@@ -87,6 +87,8 @@ jobs:
         - os: almalinux
           dist: "10"
           package: rpm
+          docker_repo: "asbru/asbru-cm"
+          docker_image: "almalinux-10"
           
           # Fedora
         - os: fedora
@@ -125,6 +127,20 @@ jobs:
           package: deb
           docker_repo: ""
           docker_image: "ubuntu-jammy"
+          repack_deb: "yes"
+
+        - os: pop
+          dist: noble
+          package: deb
+          docker_repo: "asbru/asbru-cm"
+          docker_image: "ubuntu-noble"
+          repack_deb: "yes"
+
+        - os: pop
+          dist: resolute
+          package: deb
+          docker_repo: "asbru/asbru-cm"
+          docker_image: "ubuntu-resolute"
           repack_deb: "yes"
 
     env:
