@@ -380,6 +380,19 @@ sub _pixBufFromFile {
     return $gdkpixbuf;
 }
 
+our %CACHED_METHODS;
+
+sub _check_binary {
+    my ($bin) = @_;
+    return 0 unless defined $bin && length($bin);
+    foreach my $dir (split(/:/, $ENV{PATH} // '')) {
+        next unless length $dir;
+        my $p = "$dir/$bin";
+        return 1 if (-f $p && -x $p);
+    }
+    return 0;
+}
+
 sub _getMethods {
     my $self = shift;
     my $theme_dir = shift;
@@ -389,7 +402,11 @@ sub _getMethods {
         $THEME_DIR = $theme_dir;
     }
 
-    my $rdesktop = (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} which rdesktop 1>/dev/null 2>&1") eq 0);
+    if (%CACHED_METHODS) {
+        return %CACHED_METHODS;
+    }
+
+    my $rdesktop = _check_binary('rdesktop');
     $methods{'RDP (rdesktop)'} = {
         'installed' => sub {return $rdesktop ? 1 : "No 'rdesktop' binary found.\nTo use this option, please, install :'rdesktop'";},
         'checkCFG' => sub {
@@ -460,7 +477,7 @@ sub _getMethods {
         'escape' => ["\cc"]
     };
 
-    my $xfreerdp = (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} which xfreerdp 1>/dev/null 2>&1") eq 0);
+    my $xfreerdp = _check_binary('xfreerdp');
     $methods{'RDP (xfreerdp)'} = {
         'installed' => sub {return $xfreerdp ? 1 : "No 'xfreerdp' binary found.\nTo use this option, please, install:\n'freerdp2-x11'";},
         'checkCFG' => sub {
@@ -531,8 +548,8 @@ sub _getMethods {
         'escape' => ["\cc"]
     };
 
-    my $xtightvncviewer = (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} which vncviewer 1>/dev/null 2>&1") eq 0);
-    my $tigervnc = (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} vncviewer --help 2>&1 | /bin/grep -q TigerVNC") eq 0);
+    my $xtightvncviewer = _check_binary('vncviewer');
+    my $tigervnc = $xtightvncviewer && (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} vncviewer --help 2>&1 | /bin/grep -q TigerVNC") eq 0);
     $methods{'VNC'} = {
         'installed' => sub {return $xtightvncviewer || $tigervnc ? 1 : "No 'vncviewer' binary found.\nTo use this option, please, install any of:\n'xtightvncviewer' or 'tigervnc'\n'tigervnc' is preferred, since it allows embedding its window into Ásbrú Connection Manager.";},
         'checkCFG' => sub {
@@ -599,7 +616,7 @@ sub _getMethods {
         'escape' => ["\cc"]
     };
 
-    my $cu = (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} which cu 1>/dev/null 2>&1") eq 0);
+    my $cu = _check_binary('cu');
     $methods{'Serial (cu)'} = {
         'installed' => sub {return $cu ? 1 : "No 'cu' binary found.\nTo use this option, please, install 'cu'.";},
         'checkCFG' => sub {
@@ -649,7 +666,7 @@ sub _getMethods {
         'escape' => ['~.']
     };
 
-    my $remote_tty = (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} which remote-tty 1>/dev/null 2>&1") eq 0);
+    my $remote_tty = _check_binary('remote-tty');
     $methods{'Serial (remote-tty)'} = {
         'installed' => sub {return $remote_tty ? 1 : "No 'remote-tty' binary found.\nTo use this option, please, install 'remote-tty'.";},
         'checkCFG' => sub {
@@ -715,7 +732,7 @@ sub _getMethods {
         'icon' => Gtk3::Gdk::Pixbuf->new_from_file_at_scale("$THEME_DIR/asbru_method_remote-tty.jpg", 16, 16, 0)
     };
 
-    my $c3270 = (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} which c3270 1>/dev/null 2>&1") eq 0);
+    my $c3270 = _check_binary('c3270');
     $methods{'IBM 3270/5250'} = {
         'installed' => sub {return $c3270 ? 1 : "No 'c3270' binary found.\nTo use this option, please, install 'c3270' or 'x3270-text'.";},
         'checkCFG' => sub {
@@ -767,7 +784,7 @@ sub _getMethods {
         'icon' => Gtk3::Gdk::Pixbuf->new_from_file_at_scale("$THEME_DIR/asbru_method_3270.jpg", 16, 16, 0)
     };
 
-    my $autossh = (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} which autossh 1>/dev/null 2>&1") eq 0);
+    my $autossh = _check_binary('autossh');
     $methods{'SSH'} = {
         'installed' => sub {return 1;},
         'checkCFG' => sub {
@@ -830,7 +847,7 @@ sub _getMethods {
         'escape' => ['~.']
     };
 
-    my $mosh = (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} which mosh 1>/dev/null 2>&1") eq 0);
+    my $mosh = _check_binary('mosh');
     $methods{'MOSH'} = {
         'installed' => sub {return $mosh ? 1 : "No 'mosh' binary found.\nTo use this option, please, install 'mosh'.";},
         'checkCFG' => sub {
@@ -895,7 +912,7 @@ sub _getMethods {
         'escape' => ["\c^x."]
     };
 
-    my $cadaver = (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} which cadaver 1>/dev/null 2>&1") eq 0);
+    my $cadaver = _check_binary('cadaver');
     $methods{'WebDAV'} = {
         'installed' => sub {return $cadaver ? 1 : "No 'cadaver' binary found.\nTo use this option, please, install 'cadaver'.";},
         'checkCFG' => sub {
@@ -960,7 +977,7 @@ sub _getMethods {
         'escape' => ["\cc", "quit\n"]
     };
 
-    my $telnet = (system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} which telnet 1>/dev/null 2>&1") eq 0);
+    my $telnet = _check_binary('telnet');
     $methods{'Telnet'} = {
         'installed' => sub {return $telnet ? 1 : "No 'telnet' binary found.\nTo use this option, please, install 'telnet' or 'telnet-ssl'.";},
         'checkCFG' => sub {
@@ -1212,6 +1229,7 @@ sub _getMethods {
         'icon' => Gtk3::Gdk::Pixbuf->new_from_file_at_scale("$THEME_DIR/asbru_method_generic.svg", 16, 16, 0)
     };
 
+    %CACHED_METHODS = %methods;
     return %methods;
 }
 
@@ -1295,33 +1313,37 @@ sub _registerPACIcons {
 }
 
 sub _sortTreeData {
-    my ($a_name,$b_name,$a_is_group,$b_is_group);
+    my $a_val = $$a{'value'};
+    my $b_val = $$b{'value'};
+    my $a_uuid = $$a_val[2];
+    my $b_uuid = $$b_val[2];
     my $cfg = $PACMain::FUNCS{_MAIN}{_CFG};
-    my $groups_1st = $$cfg{'defaults'}{'sort groups first'} // 1;
 
-    $a_name = lc($$a{'value'}[1]);
-    $a_name =~ s/<.+>(.+?)<\/.+>/$1/go;
-    $b_name = lc($$b{'value'}[1]);
-    $b_name =~ s/<.+>(.+?)<\/.+>/$1/go;
-    $a_is_group = $$cfg{'environments'}{$$a{'value'}[2]}{'_is_group'};
-    $b_is_group = $$cfg{'environments'}{$$b{'value'}[2]}{'_is_group'};
+    my $groups_1st = ($PACMain::FUNCS{_MAIN}{_groups_1st} //= ($$cfg{'defaults'}{'sort groups first'} // 1));
 
     if ($groups_1st) {
+        my $a_is_group = $$cfg{'environments'}{$a_uuid}{'_is_group'} // 0;
+        my $b_is_group = $$cfg{'environments'}{$b_uuid}{'_is_group'} // 0;
         if ($a_is_group && ! $b_is_group) {
             return -1;
         }
         if (! $a_is_group && $b_is_group) {
             return 1;
         }
-        if (! $a_is_group && ! $b_is_group) {
-            return $a_name cmp  $b_name;
-        }
-        if ($a_is_group && $b_is_group) {
-            return $a_name cmp  $b_name;
-        }
-    } else {
-        return $a_name cmp $b_name;
     }
+
+    my $a_name = ($$a{_name_sort} //= do {
+        my $n = lc($$a_val[1] // '');
+        $n =~ s/<.+?>(.+?)<\/.+?>/$1/g;
+        $n;
+    });
+    my $b_name = ($$b{_name_sort} //= do {
+        my $n = lc($$b_val[1] // '');
+        $n =~ s/<.+?>(.+?)<\/.+?>/$1/g;
+        $n;
+    });
+
+    return $a_name cmp $b_name;
 }
 
 # TODO : displayed name should include group

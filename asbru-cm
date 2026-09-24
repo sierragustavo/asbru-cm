@@ -288,13 +288,24 @@ sub config_migration {
 }
 
 sub getDesktopEnvironment {
-    my $c;
-    # An attempt to find desktop environment
-    foreach my $d ('gnome-shell','cinnamon','lxde','xfce','unity') {
-        $c = `$ENV{'ASBRU_ENV_FOR_EXTERNAL'} ps -eo 'comm=' | grep '$d' | wc -l`;
-        if ($c + 0) {
-            $ENV{'ASBRU_DESKTOP'} = $d;
-            last;
+    my $xdg = lc($ENV{'XDG_CURRENT_DESKTOP'} // $ENV{'DESKTOP_SESSION'} // '');
+    if ($xdg =~ /gnome/) {
+        $ENV{'ASBRU_DESKTOP'} = 'gnome-shell';
+    } elsif ($xdg =~ /cinnamon/) {
+        $ENV{'ASBRU_DESKTOP'} = 'cinnamon';
+    } elsif ($xdg =~ /lxde/) {
+        $ENV{'ASBRU_DESKTOP'} = 'lxde';
+    } elsif ($xdg =~ /xfce/) {
+        $ENV{'ASBRU_DESKTOP'} = 'xfce';
+    } elsif ($xdg =~ /unity/) {
+        $ENV{'ASBRU_DESKTOP'} = 'unity';
+    } else {
+        my $ps = `$ENV{'ASBRU_ENV_FOR_EXTERNAL'} ps -eo 'comm=' 2>/dev/null` // '';
+        foreach my $d ('gnome-shell','cinnamon','lxde','xfce','unity') {
+            if ($ps =~ /\b\Q$d\E\b/) {
+                $ENV{'ASBRU_DESKTOP'} = $d;
+                last;
+            }
         }
     }
     if (!$ENV{'ASBRU_DESKTOP'}) {
@@ -326,6 +337,16 @@ sub CheckConfigurationFile {
     if (!-e $CFG_FILE) {
         # No configuration file, do not check anyting, it's probably the first time we start Ásbrú
         return;
+    }
+    # Fast check: If asbru.nfreeze exists, is fresh (mtime >= asbru.yml), and decodes, configuration is healthy
+    if (-e $nfreeze && ((stat($nfreeze))[9] >= (stat($CFG_FILE))[9])) {
+        eval {
+            require Storable;
+            $cfg = Storable::retrieve($nfreeze);
+        };
+        if (!$@ && $cfg && ref($cfg) eq 'HASH') {
+            return;
+        }
     }
     eval {
         $cfg = YAML::LoadFile($CFG_FILE);

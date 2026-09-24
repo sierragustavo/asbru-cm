@@ -546,7 +546,8 @@ sub _locateEntries {
         $search_command = 'locate';
         $search_term = '/';
     }
-    $timestamp = stat($$cfg{database})->mtime;
+    my $st = stat($$cfg{database} // '');
+    $timestamp = $st ? $st->mtime : 0;
     if (!@KPXC_LIST || $$self{'last_timestamp'} != $timestamp) {
         @KPXC_LIST = ();
         $$self{'last_timestamp'} = $timestamp;
@@ -847,7 +848,8 @@ sub _hasCacheValue {
     } else {
         $cfg = $self->get_cfg();
     }
-    $ts = stat($$cfg{database})->mtime;
+    my $st = stat($$cfg{database} // '');
+    $ts = $st ? $st->mtime : 0;
 
     # Check if the cache should be created or invalidated
     if (!%KPXC_CACHE || ($KPXC_CACHE_TIMESTAMP && $KPXC_CACHE_TIMESTAMP < $ts)) {

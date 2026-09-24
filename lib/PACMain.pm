@@ -2673,34 +2673,51 @@ sub __search {
     }
 
     my @scored_matches;
-    my %envs = %{ $$self{_CFG}{environments} // {} };
-    my %gpath_cache;
+    my $search_index = $$self{_search_index};
+    if (!$search_index || $$self{_search_index_dirty}) {
+        $search_index = [];
+        my %envs = %{ $$self{_CFG}{environments} // {} };
+        my %gpath_cache;
+        foreach my $uuid (keys %envs) {
+            next if ($uuid eq '__PAC_SHELL__' || $uuid eq '__PAC__ROOT__');
+            my $node = $envs{$uuid};
+            next unless ref($node) eq 'HASH';
 
-    foreach my $uuid (keys %envs) {
-        next if ($uuid eq '__PAC_SHELL__' || $uuid eq '__PAC__ROOT__');
-        my $node = $envs{$uuid};
-        next unless ref($node) eq 'HASH';
+            my $name_lc  = lc($$node{'name'} // '');
+            my $ip_lc    = lc($$node{'ip'} // '');
+            my $user_lc  = lc($$node{'user'} // '');
+            my $gpath_lc = lc($self->_getNodeGroupPath($uuid, \%gpath_cache));
+            my $title_lc = lc($$node{'title'} // '');
+            my $meth_lc  = lc($$node{'method'} // '');
+            my $port_lc  = lc($$node{'port'} // '');
+            my $desc_lc  = lc($$node{'description'} // '');
 
-        my $is_group   = $$node{'_is_group'} // 0;
-        my $name       = $$node{'name'} // '';
-        my $ip         = $$node{'ip'} // '';
-        my $user       = $$node{'user'} // '';
-        my $title      = $$node{'title'} // '';
-        my $method     = $$node{'method'} // '';
-        my $port       = $$node{'port'} // '';
-        my $desc       = $$node{'description'} // '';
-        my $group_path = $self->_getNodeGroupPath($uuid, \%gpath_cache);
+            my $combined = "$name_lc $ip_lc $user_lc $gpath_lc $title_lc $meth_lc $port_lc $desc_lc";
 
-        my $name_lc  = lc($name);
-        my $ip_lc    = lc($ip);
-        my $user_lc  = lc($user);
-        my $gpath_lc = lc($group_path);
-        my $title_lc = lc($title);
-        my $meth_lc  = lc($method);
-        my $port_lc  = lc("$port");
-        my $desc_lc  = lc($desc);
+            push(@$search_index, {
+                uuid      => $uuid,
+                is_group  => $$node{'_is_group'} // 0,
+                name      => ($$node{'name'} // ''),
+                name_lc   => $name_lc,
+                ip_lc     => $ip_lc,
+                user_lc   => $user_lc,
+                gpath_lc  => $gpath_lc,
+                combined  => $combined,
+            });
+        }
+        $$self{_search_index} = $search_index;
+        $$self{_search_index_dirty} = 0;
+    }
 
-        my $combined = "$name_lc $ip_lc $user_lc $gpath_lc $title_lc $meth_lc $port_lc $desc_lc";
+    foreach my $item (@$search_index) {
+        my $uuid       = $$item{uuid};
+        my $is_group   = $$item{is_group};
+        my $name       = $$item{name};
+        my $name_lc    = $$item{name_lc};
+        my $ip_lc      = $$item{ip_lc};
+        my $user_lc    = $$item{user_lc};
+        my $gpath_lc   = $$item{gpath_lc};
+        my $combined   = $$item{combined};
 
         my $all_matched = 1;
         my $score = 0;
@@ -2772,12 +2789,12 @@ sub __search {
             $score += int(10 / (1 + abs(length($name) - length($text))));
         }
 
-        push(@scored_matches, { uuid => $uuid, score => $score, name => $name });
+        push(@scored_matches, { uuid => $uuid, score => $score, name_lc => $name_lc });
     }
 
     # Sort by score DESC, then name ASC
     @scored_matches = sort {
-        $$b{score} <=> $$a{score} || lc($$a{name}) cmp lc($$b{name})
+        $$b{score} <=> $$a{score} || $$a{name_lc} cmp $$b{name_lc}
     } @scored_matches;
 
     @result = map { $$_{uuid} } @scored_matches;
@@ -3612,7 +3629,7 @@ sub _launchTerminals {
             next;
         }
         my $uuid = $$t{_UUID};
-        my $icon = $uuid eq '__PAC_SHELL__' ? Gtk3::Gdk::Pixbuf->new_from_file_at_scale("$THEME_DIR/asbru_shell.svg", 16, 16, 0) : $$self{_METHODS}{ $$self{_CFG}{'environments'}{$uuid}{'method'} }{'icon'};
+        my $icon = $uuid eq '__PAC_SHELL__' ? ($$self{_shell_icon} //= Gtk3::Gdk::Pixbuf->new_from_file_at_scale("$THEME_DIR/asbru_shell.svg", 16, 16, 0)) : $$self{_METHODS}{ $$self{_CFG}{'environments'}{$uuid}{'method'} }{'icon'};
         my $name = __($$self{_CFG}{'environments'}{$uuid}{'name'});
         unshift(@{ $$self{_GUI}{treeHistory}{data} }, ({ value => [ $icon, $name, $uuid,  strftime("%H:%M:%S %d-%m-%Y", localtime($FUNCS{_STATS}{statistics}{$uuid}{start})) ] }));
     }
@@ -3914,6 +3931,7 @@ sub _loadTreeConfiguration {
     }
 
     @{ $$self{_GUI}{treeConnections}{'data'} } = @tree_data;
+    $$self{_search_index_dirty} = 1;
 
     # Select the root path
     $tree->set_cursor($tree->_getPath('__PAC__ROOT__'), undef, 0);
@@ -5222,6 +5240,8 @@ sub _bulkEdit {
 sub _setCFGChanged {
     my $self = shift;
     my $stat = shift;
+
+    $$self{_search_index_dirty} = 1 if $stat;
 
     if ($ENV{"ASBRU_IS_READONLY"}) {
         $$self{_GUI}{saveBtn}->set_label('READ ONLY INSTANCE');

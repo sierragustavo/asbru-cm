@@ -210,7 +210,11 @@ sub new {
     # Setup callbacks
     _setupCallbacks($self) or return 0;
     # Load connection methods
-    %{$$self{_METHODS}} = _getMethods($self, $PACMain::FUNCS{_MAIN}{_THEME}) or return 0;
+    if ($PACMain::FUNCS{_MAIN} && defined $PACMain::FUNCS{_MAIN}{_METHODS} && %{$PACMain::FUNCS{_MAIN}{_METHODS}}) {
+        $$self{_METHODS} = $PACMain::FUNCS{_MAIN}{_METHODS};
+    } else {
+        %{$$self{_METHODS}} = _getMethods($self, $PACMain::FUNCS{_MAIN}{_THEME}) or return 0;
+    }
 
     $PACMain::RUNNING{$$self{'_UUID_TMP'}}{'uuid'} = $$self{'_UUID'};
     $PACMain::RUNNING{$$self{'_UUID_TMP'}}{'terminal'} = $self;
