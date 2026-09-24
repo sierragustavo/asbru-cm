@@ -84,6 +84,11 @@ sub update {
     my $uuid = shift;
     my $cfg = shift // $PACMain::FUNCS{_MAIN}{_CFG};
 
+    if (defined $uuid && defined $$self{_rendered_uuid} && $$self{_rendered_uuid} eq $uuid) {
+        return 1;
+    }
+    $$self{_rendered_uuid} = $uuid;
+
     $$self{cfg} = $cfg;
     $$self{uuid} = $uuid;
     my $name = $$cfg{environments}{$uuid}{name};

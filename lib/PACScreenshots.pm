@@ -86,7 +86,11 @@ sub update {
         $$self{cfg} = $cfg;
     }
     if (defined $uuid) {
+        if (defined $$self{_rendered_uuid} && $$self{_rendered_uuid} eq $uuid) {
+            return 1;
+        }
         $$self{uuid} = $uuid;
+        $$self{_rendered_uuid} = $uuid;
     }
 
     # Destroy previous widgets

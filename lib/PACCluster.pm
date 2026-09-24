@@ -151,14 +151,20 @@ sub show {
 sub _loadTreeConfiguration {
     my $self = shift;
     my $tree = shift // $$self{_WINDOWCLUSTER}{treeConnections};
+    my $main = $PACMain::FUNCS{_MAIN};
 
-    @{$$self{_WINDOWCLUSTER}{treeConnections}{'data'}} = ({
-        value => [$GROUPICON_ROOT, '<b>My Connections</b>', '__PAC__ROOT__'],
-        children => []
-    });
-    foreach my $child (keys %{$PACMain::{FUNCS}{_MAIN}{_CFG}{environments}{'__PAC__ROOT__'}{children}}) {
-        push(@{$$tree{data}}, $self->__recurLoadTree($child) );
+    my @tree_data = (
+        {
+            value => [$GROUPICON_ROOT, '<b>My Connections</b>', '__PAC__ROOT__'],
+            children => []
+        }
+    );
+    my $root_children = $$main{_CFG}{environments}{'__PAC__ROOT__'}{children} // {};
+    foreach my $child (keys %{$root_children}) {
+        push(@tree_data, $self->__recurLoadTree($child));
     }
+
+    @{$$self{_WINDOWCLUSTER}{treeConnections}{'data'}} = @tree_data;
 
     # Select the root path
     $tree->set_cursor(Gtk3::TreePath->new_from_string('0'), undef, 0);
@@ -169,19 +175,21 @@ sub _loadTreeConfiguration {
 sub __recurLoadTree {
     my $self = shift;
     my $uuid = shift;
+    my $main = $PACMain::FUNCS{_MAIN};
 
-    my $node_name = $PACMain::{FUNCS}{_MAIN}->__treeBuildNodeName($uuid);
+    my $node_name = $main->__treeBuildNodeName($uuid);
     my @list;
 
-    if (! $PACMain::{FUNCS}{_MAIN}{_CFG}{environments}{$uuid}{'_is_group'}) {
+    if (! $$main{_CFG}{environments}{$uuid}{'_is_group'}) {
         push(@list, {
-            value => [$PACMain::{FUNCS}{_MAIN}{_METHODS}{$PACMain::{FUNCS}{_MAIN}{_CFG}{'environments'}{$uuid}{'method'}}{'icon'}, $node_name, $uuid],
+            value => [$$main{_METHODS}{$$main{_CFG}{'environments'}{$uuid}{'method'}}{'icon'}, $node_name, $uuid],
             children => []
         });
     } else {
         my @clist;
-        foreach my $child (keys %{$PACMain::{FUNCS}{_MAIN}{_CFG}{environments}{$uuid}{children}}) {
-            push(@clist, $self->__recurLoadTree($child) );
+        my $children = $$main{_CFG}{environments}{$uuid}{children} // {};
+        foreach my $child (keys %{$children}) {
+            push(@clist, $self->__recurLoadTree($child));
         }
         push(@list, {
             value => [$GROUPICONCLOSED, $node_name, $uuid],
@@ -193,7 +201,7 @@ sub __recurLoadTree {
 
 sub __treeSort {
     my ($treestore, $a_iter, $b_iter) = @_;
-    my $cfg = $PACMain::{FUNCS}{_MAIN}{_CFG};
+    my $cfg = $PACMain::FUNCS{_MAIN}{_CFG};
     my $groups_1st = $$cfg{'defaults'}{'sort groups first'} // 1;
 
     my $b_uuid = $treestore->get_value($b_iter, 2);
@@ -216,8 +224,8 @@ sub __treeSort {
 
     # Groups first...
     if ($groups_1st) {
-        my $a_is_group = $$cfg{'environments'}{$a_uuid}{'_is_group'};
-        my $b_is_group = $$cfg{'environments'}{$b_uuid}{'_is_group'};
+        my $a_is_group = $$cfg{'environments'}{$a_uuid}{'_is_group'} // 0;
+        my $b_is_group = $$cfg{'environments'}{$b_uuid}{'_is_group'} // 0;
 
         if ($a_is_group && ! $b_is_group) {
             return -1;
@@ -227,8 +235,10 @@ sub __treeSort {
         }
     }
 
-    # ... then alphabetically
-    return lc($$cfg{'environments'}{$a_uuid}{name}) cmp lc($$cfg{'environments'}{$b_uuid}{name});
+    # ... then alphabetically with memoized lowercase names
+    my $a_name_lc = ($$cfg{'environments'}{$a_uuid}{'_name_lc'} //= lc($$cfg{'environments'}{$a_uuid}{'name'} // ''));
+    my $b_name_lc = ($$cfg{'environments'}{$b_uuid}{'_name_lc'} //= lc($$cfg{'environments'}{$b_uuid}{'name'} // ''));
+    return $a_name_lc cmp $b_name_lc;
 }
 
 sub _initGUI {

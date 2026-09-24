@@ -3144,14 +3144,11 @@ sub _treeConnections_menu {
         sensitive =>  scalar @sel >= 1,
         code => sub {
             if ($sel[0] eq '__PAC__ROOT__') {
-                $$self{_GUI}{treeConnections}->get_selection()->unselect_path(Gtk3::TreePath->new_from_string('0'));
-                for my $i (1 .. 65535) {
-                    $$self{_GUI}{treeConnections}->get_selection()->select_path(Gtk3::TreePath->new_from_string("$i"));
-                }
+                my $sel_obj = $$self{_GUI}{treeConnections}->get_selection();
+                $sel_obj->select_all();
+                $sel_obj->unselect_path(Gtk3::TreePath->new_from_string('0'));
                 $self->__exportNodes();
-                for my $i (1 .. 65535) {
-                    $$self{_GUI}{treeConnections}->get_selection()->unselect_path(Gtk3::TreePath->new_from_string("$i"));
-                }
+                $sel_obj->unselect_all();
                 $$self{_GUI}{treeConnections}->set_cursor(Gtk3::TreePath->new_from_string('0'), undef, 0);
             } else {
                 $self->__exportNodes();
@@ -4187,9 +4184,12 @@ sub _updateGUIPreferences {
         $$self{_CFG}{'environments'}{$uuid}{'_protected'} and $protected = 1;
     }
 
-    $self->_clearLeftMenuTabLabels();
-    if ($$self{_CFG}{defaults}{'show tree titles'}) {
-        $$self{_GUI}{nbTreeTabLabel}->set_text(' Connections');
+    if (($$self{_active_left_tab} // '') ne 'tree') {
+        $self->_clearLeftMenuTabLabels();
+        if ($$self{_CFG}{defaults}{'show tree titles'}) {
+            $$self{_GUI}{nbTreeTabLabel}->set_text(' Connections');
+        }
+        $$self{_active_left_tab} = 'tree';
     }
     $$self{_GUI}{connSearch}->set_sensitive(1);
     $$self{_GUI}{groupAddBtn}->set_sensitive($total eq 1 && ($is_group || $is_root) && !$protected);
@@ -4252,9 +4252,12 @@ sub _updateGUIFavourites {
     my $total = scalar(@sel_uuids);
     my $uuid = $sel_uuids[0];
 
-    $self->_clearLeftMenuTabLabels();
-    if ($$self{_CFG}{defaults}{'show tree titles'}) {
-        $$self{_GUI}{nbFavTabLabel}->set_text(' Favourites');
+    if (($$self{_active_left_tab} // '') ne 'fav') {
+        $self->_clearLeftMenuTabLabels();
+        if ($$self{_CFG}{defaults}{'show tree titles'}) {
+            $$self{_GUI}{nbFavTabLabel}->set_text(' Favourites');
+        }
+        $$self{_active_left_tab} = 'fav';
     }
 
     $$self{_GUI}{connSearch}->set_sensitive(0);
@@ -4287,10 +4290,14 @@ sub _updateGUIHistory {
     my $total = scalar(@sel_uuids);
     my $uuid = $sel_uuids[0];
 
-    $self->_clearLeftMenuTabLabels();
-    if ($$self{_CFG}{defaults}{'show tree titles'}) {
-        $$self{_GUI}{nbHistTabLabel}->set_text(' History');
+    if (($$self{_active_left_tab} // '') ne 'hist') {
+        $self->_clearLeftMenuTabLabels();
+        if ($$self{_CFG}{defaults}{'show tree titles'}) {
+            $$self{_GUI}{nbHistTabLabel}->set_text(' History');
+        }
+        $$self{_active_left_tab} = 'hist';
     }
+
     $$self{_GUI}{connSearch}->set_sensitive(0);
     $$self{_GUI}{groupAddBtn}->set_sensitive(0);
     $$self{_GUI}{connAddBtn}->set_sensitive(0);
@@ -4319,9 +4326,12 @@ sub _updateGUIClusters {
     my $total = scalar(@sel_uuids);
     my $uuid = $sel_uuids[0];
 
-    $self->_clearLeftMenuTabLabels();
-    if ($$self{_CFG}{defaults}{'show tree titles'}) {
-        $$self{_GUI}{nbCluTabLabel}->set_text(' Clusters');
+    if (($$self{_active_left_tab} // '') ne 'clu') {
+        $self->_clearLeftMenuTabLabels();
+        if ($$self{_CFG}{defaults}{'show tree titles'}) {
+            $$self{_GUI}{nbCluTabLabel}->set_text(' Clusters');
+        }
+        $$self{_active_left_tab} = 'clu';
     }
     $$self{_GUI}{connSearch}->set_sensitive(0);
     $$self{_GUI}{groupAddBtn}->set_sensitive(0);

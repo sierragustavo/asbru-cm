@@ -1724,7 +1724,11 @@ sub _watchConnectionData {
             eval {$$self{_EXEC}{RECEIVED} = ${fd_retrieve($$self{_SOCKET_CLIENT_EXEC})};};
             if ($@) {_wMessage($$self{_PARENTWINDOW}, "ERROR: Could not retrieve output from command execution:\n$@"); return 1;}
             if (defined $$self{_EXEC}{RECEIVED}) {
-                $$self{_EXEC_PROCESS} = Glib::Timeout->add(100, sub {
+                if (defined $$self{_EXEC_PROCESS}) {
+                    eval { Glib::Source->remove($$self{_EXEC_PROCESS}); };
+                }
+                $$self{_EXEC_PROCESS} = Glib::Timeout->add(50, sub {
+                    delete $$self{_EXEC_PROCESS};
                     $self->_pipeExecOutput();
                     return 0;
                 });
@@ -2559,7 +2563,7 @@ sub _setTabColour {
 
     # Auto take screenshots of connections without any of them
     # Disable auto screen shots on compact mode
-    if (($$self{_CFG}{'defaults'}{'layout'} ne 'Compact') && (defined $$self{_TAKE_SCREENSHOT} && scalar(@{$$self{_CFG}{environments}{$$self{_UUID}}{screenshots}}))) {
+    if (($$self{_CFG}{'defaults'}{'layout'} ne 'Compact') && (! defined $$self{_TAKE_SCREENSHOT} && ! scalar(@{$$self{_CFG}{environments}{$$self{_UUID}}{screenshots} // []}))) {
         if (($$self{_UUID} ne '__PAC__QUICK__CONNECT__') && ($$self{_UUID} ne '__PAC_SHELL__') && $$self{'_CFG'}{'defaults'}{'show screenshots'}) {
             $$self{_TAKE_SCREENSHOT} = Glib::Timeout->add_seconds($$self{_CFG}{environments}{$$self{_UUID}}{method} =~ /rdesktop|RDP/go ? 10 : 2, sub {
                 if ((! $$self{CONNECTED}) || (! $$self{_FOCUSED})) {

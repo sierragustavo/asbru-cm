@@ -173,7 +173,7 @@ sub __treeSort {
     my $b_node = $$cfg{'environments'}{$b_uuid};
 
     # Groups first...
-    my $groups_1st = $$cfg{'defaults'}{'sort groups first'} // 1;
+    my $groups_1st = ($$self{_groups_1st} //= ($$cfg{'defaults'}{'sort groups first'} // 1));
     if ($groups_1st) {
         my $a_is_group = (ref($a_node) eq 'HASH') ? ($$a_node{'_is_group'} // 0) : 0;
         my $b_is_group = (ref($b_node) eq 'HASH') ? ($$b_node{'_is_group'} // 0) : 0;
