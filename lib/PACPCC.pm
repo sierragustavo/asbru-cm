@@ -970,6 +970,19 @@ sub _execOnClusterTerminals {
 sub _updateGUI {
     my $self = shift;
 
+    my $win_visible = ($$self{_WINDOWPCC} && $$self{_WINDOWPCC}{main} && $$self{_WINDOWPCC}{main}->get_visible());
+    if (!$win_visible) {
+        $$self{_CLUSTERS} = undef;
+        foreach my $uuid (keys %{$$self{_RUNNING}}) {
+            my $name = $$self{_RUNNING}{$uuid}{'terminal'}{'_NAME'};
+            next unless defined $name;
+            if (my $cluster = $$self{_RUNNING}{$uuid}{'terminal'}{_CLUSTER}) {
+                $$self{_CLUSTERS}{$cluster}{$uuid} = 1;
+            }
+        }
+        return 1;
+    }
+
     # Empty the entry box
     $$self{_WINDOWPCC}{entryData}->set_text('');
 

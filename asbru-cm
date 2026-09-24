@@ -88,6 +88,14 @@ BEGIN {
     # See https://www.perlmonks.org/?node_id=11109454
     delete $ENV{'GTK_OVERLAY_SCROLLING'};
 
+    # Auto-detect Wayland and default GDK_BACKEND to x11 (via Xwayland) if not
+    # explicitly set by user. This prevents GtkSocket/XID embedding crashes under native Wayland.
+    if (!defined($ENV{'GDK_BACKEND'})) {
+        if (($ENV{'WAYLAND_DISPLAY'} // '') ne '' || ($ENV{'XDG_SESSION_TYPE'} // '') eq 'wayland') {
+            $ENV{'GDK_BACKEND'} = 'x11';
+        }
+    }
+
     # Ensure ASBRU_ENV_FOR_EXTERNAL is defined
     # (it should be defined when running inside AppImage, otherwise must remain empty)
     if (!defined($ENV{'ASBRU_ENV_FOR_EXTERNAL'})) {
@@ -102,6 +110,15 @@ use FindBin qw ($RealBin $Bin $Script);
 use lib "$RealBin/lib", "$RealBin/lib/ex", "$RealBin/lib/edit";
 use File::Copy;
 use YAML qw (LoadFile);
+BEGIN {
+    eval {
+        require YAML::XS;
+        no warnings 'redefine';
+        *YAML::LoadFile = \&YAML::XS::LoadFile;
+        *YAML::DumpFile = \&YAML::XS::DumpFile;
+        *LoadFile       = \&YAML::XS::LoadFile;
+    };
+}
 use PACMain;
 use PACUtils qw (_appName);
 use File::Temp qw (tempdir);

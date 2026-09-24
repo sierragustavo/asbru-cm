@@ -567,6 +567,7 @@ sub _getDefaultConfig {
     $$cfg{'terminal'}{'Alt+n'}         = ['Terminal',          'showconnections',     'Show/Hide connections list'];
     $$cfg{'terminal'}{'Alt+e'}         = ['Terminal',          'edit_node',           'Edit connection'];
     $$cfg{'terminal'}{'Ctrl+plus'}     = ['Terminal',          'zoomin',              'Zoom in text'];
+    $$cfg{'terminal'}{'Ctrl+equal'}    = ['Terminal',          'zoomin',              'Zoom in text'];
     $$cfg{'terminal'}{'Ctrl+minus'}    = ['Terminal',          'zoomout',             'Zoom out text'];
     $$cfg{'terminal'}{'Ctrl+0'}        = ['Terminal',          'zoomreset',           'Zoom reset text'];
     $$cfg{'terminal'}{'Ctrl+ampersand'}= ['Terminal',          'cisco',               'Send Cisco interrupt keypress'];

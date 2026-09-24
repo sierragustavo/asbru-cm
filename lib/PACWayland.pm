@@ -48,6 +48,8 @@ our @EXPORT_OK = qw(
     rdp_client_for_wayland
     wayland_rdesktop_opts
     status_line
+    get_scale_factor
+    freerdp_hidpi_opts
 );
 
 # END: Import Modules
@@ -68,6 +70,35 @@ sub is_wayland {
     return 1 if $ENV{WAYLAND_DISPLAY};
     return 1 if ( $ENV{XDG_SESSION_TYPE} // '' ) eq 'wayland';
     return 0;
+}
+
+# ---------------------------------------------------------------------------
+# get_scale_factor()
+# Returns detected display scale factor (1, 2, etc.) for HiDPI rendering.
+# ---------------------------------------------------------------------------
+sub get_scale_factor {
+    if (defined $ENV{GDK_SCALE} && $ENV{GDK_SCALE} =~ /^\d+$/ && $ENV{GDK_SCALE} > 0) {
+        return int($ENV{GDK_SCALE});
+    }
+    # Fallback to gsettings text scaling factor if set
+    my $scaling = `gsettings get org.gnome.desktop.interface text-scaling-factor 2>/dev/null`;
+    if ($scaling && $scaling =~ /([\d\.]+)/) {
+        my $val = $1;
+        return 2 if ($val >= 1.5);
+    }
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# freerdp_hidpi_opts()
+# Returns HiDPI scaling flags for FreeRDP when high resolution is detected.
+# ---------------------------------------------------------------------------
+sub freerdp_hidpi_opts {
+    my $scale = get_scale_factor();
+    if ($scale >= 2) {
+        return '/scale:180 /scale-desktop:100 /dynamic-resolution';
+    }
+    return '';
 }
 
 # ---------------------------------------------------------------------------

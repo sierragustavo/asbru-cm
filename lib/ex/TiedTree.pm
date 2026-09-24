@@ -80,19 +80,26 @@ sub _do_node
 {
     my ($model, $iter, $store) = @_;
 
-    # tie this row's values
-    my @row;
-    tie @row, 'Gtk3::SimpleList::TiedRow', $model, $iter;
+    # Set row values atomically in a single C call to avoid intermediate signal thrashing
     if ('ARRAY' eq ref $store->{value}) {
-        @row = @{$store->{value}};
+        my @vals;
+        my $i = 0;
+        foreach my $v (@{ $store->{value} }) {
+            push @vals, $i++, $v;
+        }
+        $model->set($iter, @vals) if @vals;
     } else {
-        $row[0] = $store->{value};
+        $model->set_value($iter, 0, $store->{value});
     }
 
-    # tie the children, a recursive TiedTree
-    my @a;
-    tie @a, 'TiedTree', $model, $iter;
-    @a = @{$store->{children}} if ($store->{children});
+    # Process children directly without intermediate tie wrapper overhead
+    if ($store->{children} && ref($store->{children}) eq 'ARRAY') {
+        foreach my $child (@{ $store->{children} }) {
+            next unless $child;
+            my $citer = $model->append($iter);
+            _do_node($model, $citer, $child);
+        }
+    }
 }
 
 sub STORE {# this, index, value
@@ -265,12 +272,8 @@ sub _remove_children
     my $model = shift;
     my $piter = shift;
 
-    my $nchild = $model->iter_n_children ($piter)-1;
-    my $citer; # child iter
-    foreach (0..$nchild)
-    {
-        $citer = $model->iter_nth_child ($piter, $_);
-        $model->remove ($citer) if ($citer);
+    while (my $citer = $model->iter_children($piter)) {
+        $model->remove($citer);
     }
 }
 

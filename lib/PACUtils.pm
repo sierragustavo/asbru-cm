@@ -43,6 +43,16 @@ use Sys::Hostname;
 use Net::ARP;
 use Net::Ping;
 use YAML;
+BEGIN {
+    eval {
+        require YAML::XS;
+        no warnings 'redefine';
+        *YAML::LoadFile = \&YAML::XS::LoadFile;
+        *YAML::DumpFile = \&YAML::XS::DumpFile;
+        *YAML::Load     = \&YAML::XS::Load;
+        *YAML::Dump     = \&YAML::XS::Dump;
+    };
+}
 use File::stat;
 use Encode;
 use DynaLoader; # Required for PACTerminal and PACShell modules

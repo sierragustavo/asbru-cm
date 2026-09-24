@@ -298,6 +298,7 @@ sub new {
 # DESTRUCTOR
 sub DESTROY {
     my $self = shift;
+    $self->_cleanupAllTimers();
     if (defined $self->{_SOCKET_CONN}) {
         $self->{_SOCKET_CONN}->close();
     }
@@ -305,6 +306,74 @@ sub DESTROY {
         $self->{_SOCKET_CLIENT}->close();
     }
     undef $self;
+    return 1;
+}
+
+sub _startPulseProgressBar {
+    my $self = shift;
+    $$self{_PULSE} = 1;
+
+    if (! defined $$self{_GUI}{pb}) {
+        $$self{_GUI}{pb} = Gtk3::ProgressBar->new();
+        $$self{_GUI}{bottombox}->pack_start($$self{_GUI}{pb}, 0, 1, 0);
+        $$self{_GUI}{pb}->show();
+    }
+
+    if (! defined $$self{_PULSE_TIMER}) {
+        $$self{_PULSE_TIMER} = Glib::Timeout->add (100, sub {
+            if ($$self{_PULSE} && defined $$self{_GUI}{pb} && $$self{_GUI}{pb}->get_property('visible')) {
+                $$self{_GUI}{pb}->pulse;
+                return 1;
+            } else {
+                delete $$self{_PULSE_TIMER};
+                return 0;
+            }
+        });
+    }
+    return 1;
+}
+
+sub _stopPulseProgressBar {
+    my $self = shift;
+    $$self{_PULSE} = 0;
+
+    if (defined $$self{_PULSE_TIMER}) {
+        eval { Glib::Source->remove($$self{_PULSE_TIMER}); };
+        delete $$self{_PULSE_TIMER};
+    }
+    if (defined $$self{_GUI}{pb}) {
+        $$self{_GUI}{pb}->destroy();
+        $$self{_GUI}{pb} = undef;
+    }
+    return 1;
+}
+
+sub _cleanupAllTimers {
+    my $self = shift;
+
+    $self->_stopPulseProgressBar();
+
+    if (defined $$self{_TAKE_SCREENSHOT}) {
+        eval { Glib::Source->remove($$self{_TAKE_SCREENSHOT}); };
+        delete $$self{_TAKE_SCREENSHOT};
+    }
+    if (defined $$self{_EXEC_PROCESS}) {
+        eval { Glib::Source->remove($$self{_EXEC_PROCESS}); };
+        delete $$self{_EXEC_PROCESS};
+    }
+    if (defined $$self{_SEND_STRING}) {
+        eval { Glib::Source->remove($$self{_SEND_STRING}); };
+        delete $$self{_SEND_STRING};
+    }
+    if (defined $$self{_SOCKET_CLIENT_WATCH}) {
+        eval { Glib::Source->remove($$self{_SOCKET_CLIENT_WATCH}); };
+        delete $$self{_SOCKET_CLIENT_WATCH};
+    }
+    if (defined $self->{_LOG}{timeout}) {
+        eval { Glib::Source->remove($self->{_LOG}{timeout}); };
+        delete $self->{_LOG}{timeout};
+    }
+    $self->_stopEmbedKidnapTimeout();
     return 1;
 }
 
@@ -350,21 +419,11 @@ sub start {
     my $string = $method eq 'generic' ? encode('UTF-8', "${COL_GREEN}${reconnect_msg}LAUNCHING${COL_RESET} ${COL_YELL}$title${COL_RESET}") : encode('UTF-8', "${COL_GREEN}${reconnect_msg}CONNECTING WITH${COL_RESET} ${COL_YELL}$title${COL_RESET}");
     _vteFeed($$self{_GUI}{_VTE}, "\r\n$string (" . (localtime(time)) . ")$reconnect_count\r\n\n");
 
-    $$self{_PULSE} = 1;
-
     # Check for pre-connection commands execution
     $self->_wPrePostExec('local before');
 
     # Prepare a timer to "pulse" the progress bar while connecting
-    $$self{_PULSE_TIMER} = Glib::Timeout->add (100, sub {
-        if ($$self{_PULSE} && defined $$self{_GUI}{pb} && $$self{_GUI}{pb}->get_property('visible')) {
-            $$self{_GUI}{pb}->pulse;
-            return 1;
-        } else {
-            delete $$self{_PULSE_TIMER};
-            return 0;
-        }
-    });
+    $self->_startPulseProgressBar();
 
     $$self{_CFG}{'tmp'}{'log file'} = $PACMain::FUNCS{_MAIN}{_Vte}{get_text_range}? '' : $$self{_LOGFILE};
     $$self{_CFG}{'tmp'}{'socket'} = $$self{_TMPSOCKET};
@@ -628,18 +687,7 @@ sub stop {
     if (defined $$self{_SOCKET_CLIENT}) {
         $$self{_SOCKET_CLIENT}->close();
     }
-    if (defined $$self{_SOCKET_CLIENT_WATCH}) {
-        eval {
-            Glib::Source->remove($$self{_SOCKET_CLIENT_WATCH});
-        };
-    }
-    if (defined $$self{_SEND_STRING}) {
-        eval {
-            Glib::Source->remove($$self{_SEND_STRING});
-            undef $$self{_SEND_STRING};
-        };
-    }
-    $self->_stopEmbedKidnapTimeout();
+    $self->_cleanupAllTimers();
 
     # Finish the GUI
     if ($$self{_TABBED} && $p_widget) {
@@ -1314,6 +1362,23 @@ sub _setupCallbacks {
         );
     }
 
+    # Ctrl + Scroll Wheel to Zoom In / Out on VTE
+    $$self{_GUI}{_VTE}->signal_connect('scroll_event' => sub {
+        my ($widget, $event) = @_;
+        my $state = $event->get_state();
+        if ($state * ['control-mask']) {
+            my $dir = $event->direction;
+            if ($dir eq 'up') {
+                $self->_zoomHandler('zoomin');
+                return 1;
+            } elsif ($dir eq 'down') {
+                $self->_zoomHandler('zoomout');
+                return 1;
+            }
+        }
+        return 0;
+    });
+
     # Right mouse click on VTE
     $$self{_GUI}{_VTE}->signal_connect('button_press_event' => sub {
         if ($right_click_deep) {
@@ -1610,56 +1675,17 @@ sub _watchConnectionData {
         } elsif ($data =~ /^PIPE_WAIT\[(.+?)\]\[(.+)\]/go) {
             my $time = $1;
             my $prompt = $2;
-
-            if (! defined $$self{_GUI}{pb}) {
-                $$self{_GUI}{pb} = Gtk3::ProgressBar->new();
-                $$self{_GUI}{bottombox}->pack_start($$self{_GUI}{pb}, 0, 1, 0);
-                $$self{_GUI}{pb}->show();
-            }
             $$self{CONNECTING} = 1;
-            $$self{_PULSE} = 1;
-
-            # Prepare a timer to "pulse" the progress bar while executing script
-            $$self{_PULSE_TIMER} = Glib::Timeout->add (100, sub {
-                if (defined $$self{_GUI}{pb}) {
-                    $$self{_GUI}{pb}->pulse;
-                    return $$self{_PULSE};
-                }
-            });
+            $self->_startPulseProgressBar();
         } elsif ($data =~ /^SCRIPT_(START|STOP)\[NAME:(.+)\]/go) {
-            $$self{_PULSE_TIMER} = Glib::Timeout->add (100, sub {
-                if (defined $$self{_GUI}{pb}) {
-                    $$self{_GUI}{pb}->pulse();
-                }
-                return $$self{_PULSE};
-            });
-        }
-        elsif ($data =~ /^SCRIPT_(START|STOP)\[NAME:(.+)\]/go) {
             my ($status, $name) = ($1, $2);
             $$self{_SCRIPT_STATUS} = $status;
             $$self{_SCRIPT_NAME} = $name;
 
-            if ($$self{CONNECTING} = $status eq 'START') {
-                if (! defined $$self{_GUI}{pb}) {
-                    $$self{_GUI}{pb} = Gtk3::ProgressBar->new();
-                    $$self{_GUI}{bottombox}->pack_start($$self{_GUI}{pb}, 0, 1, 0);
-                    $$self{_GUI}{pb}->show();
-                }
-                $$self{_PULSE} = 1;
-
-                # Prepare a timer to "pulse" the progress bar while executing script
-                $$self{_PULSE_TIMER} = Glib::Timeout->add (100, sub {
-                    if (defined $$self{_GUI}{pb}) {
-                        $$self{_GUI}{pb}->pulse;
-                        return $$self{_PULSE};
-                    }
-                });
+            if ($$self{CONNECTING} = ($status eq 'START')) {
+                $self->_startPulseProgressBar();
             } else {
-                $$self{_PULSE} = 0;
-                if (defined $$self{_GUI}{pb}) {
-                    $$self{_GUI}{pb}->destroy();
-                }
-                $$self{_GUI}{pb} = undef;
+                $self->_stopPulseProgressBar();
                 $PACMain::FUNCS{_CLUSTER}->_updateGUI();
             }
         } elsif ($data =~ /^SCRIPT_SUB_(.+)\[NAME:(.+)\]\[PARAMS:(.*)\]/go) {
@@ -1682,7 +1708,7 @@ sub _watchConnectionData {
             my ($chain_name, $chain_uuid, $exp_partial, $exp_total) = ($1, $2, $3, $4);
             $$self{_GUI}{statusExpect}->set_from_stock('gtk-media-play', 'button');
             $$self{_GUI}{statusExpect}->set_tooltip_text("Expect / Execute: $1 / $2");
-            $$self{_PULSE} = 0;
+            $self->_stopPulseProgressBar();
             if (! defined $$self{_GUI}{pb}) {
                 $$self{_GUI}{pb} = Gtk3::ProgressBar->new();
                 $$self{_GUI}{bottombox}->pack_start($$self{_GUI}{pb}, 0, 1, 0);
@@ -1705,23 +1731,9 @@ sub _watchConnectionData {
             }
         } elsif ($data =~ /^SENDSLOW:(.+)/go) {
             my $txt = $1;
-            $$self{_PULSE} = 1;
-            if (! defined $$self{_GUI}{pb}) {
-                $$self{_GUI}{pb} = Gtk3::ProgressBar->new();
-                $$self{_GUI}{bottombox}->pack_start($$self{_GUI}{pb}, 0, 1, 0);
-                $$self{_GUI}{pb}->show();
-            }
-            # Prepare a timer to "pulse" the progress bar while connecting
-            $$self{_PULSE_TIMER} = Glib::Timeout->add (100, sub {
-                if ($$self{_PULSE} && defined $$self{_GUI}{pb} && $$self{_GUI}{pb}->get_property('visible')) {
-                    $$self{_GUI}{pb}->pulse;
-                    return 1;
-                } else {
-                    delete $$self{_PULSE_TIMER};
-                    return 0;
-                }
-            });
+            $self->_startPulseProgressBar();
         } elsif (($data eq 'DISCONNECTED') || ($data =~ /^CLOSE:.+/go) || ($data =~ /^TIMEOUT:.+/go) || ($data =~ /^connect\(\) failed with error '.+'$/go)) {
+            $self->_stopPulseProgressBar();
             $self->_stopEmbedKidnapTimeout();
             if ($$self{EMBED}) {
                 $self->_showEmbedMessages();
@@ -1732,7 +1744,12 @@ sub _watchConnectionData {
         } elsif ($data =~ /^EXPECT:WAITING:(.+)/go) {
             $$self{_GUI}{statusExpect}->set_from_stock('gtk-media-play', 'button');
             $$self{_GUI}{statusExpect}->set_tooltip_text("Expecting '$1'");
-            $$self{_PULSE} = 0;
+            $self->_stopPulseProgressBar();
+            if (! defined $$self{_GUI}{pb}) {
+                $$self{_GUI}{pb} = Gtk3::ProgressBar->new();
+                $$self{_GUI}{bottombox}->pack_start($$self{_GUI}{pb}, 0, 1, 0);
+                $$self{_GUI}{pb}->show();
+            }
             $$self{_GUI}{pb}->set_fraction(++$$self{_EXPECTED} / $$self{_TOTAL});
             $$self{CONNECTING} = 1;
         } elsif ($data =~ /^SPAWNED:'(.+)'\s*\(PID:(\d+)\)$/go) {
@@ -1773,36 +1790,32 @@ sub _receiveData {
     my $self = shift;
     my $socket = shift // $$self{_SOCKET_CLIENT};
 
-    my $buffer = '';
-    $$self{_SOCKET_BUFFER} = ();
+    my $buffer = $$self{_SOCKET_PARTIAL_BUFFER} // '';
+    $$self{_SOCKET_BUFFER} = [];
 
     my $data = '';
     my $bytes;
+    my $chunk_size = 16384;
 
     # At least one read should be done
     do {
-        $bytes = sysread($socket, $data, 1024) // 0;
-        if (!defined $bytes) {
+        $bytes = sysread($socket, $data, $chunk_size) // 0;
+        if (!defined $bytes || $bytes <= 0) {
             last;
         }
 
         $buffer .= $data;
-        chomp $buffer;
 
-        $buffer =~ s/\R/ /go;
-
-        my $empty_buffer = 0;
-        while ($buffer =~ s/PAC_MSG_START\[(.+?)\]PAC_MSG_END/$1/o) {
-            my $buffer = $1;
-            if (!$buffer) {
-                next;
-            }
-            push(@{$$self{_SOCKET_BUFFER}}, $buffer);
-            $empty_buffer = 1;
+        while ($buffer =~ s/PAC_MSG_START\[(.*?)\]PAC_MSG_END//s) {
+            my $msg = $1;
+            next unless length($msg);
+            $msg =~ s/\R/ /g;
+            push(@{$$self{_SOCKET_BUFFER}}, $msg);
         }
-        $empty_buffer and $buffer = '';
 
-    } until $bytes < 1024;
+    } until $bytes < $chunk_size;
+
+    $$self{_SOCKET_PARTIAL_BUFFER} = $buffer;
 
     return 1;
 }
@@ -2560,6 +2573,7 @@ sub _setTabColour {
                 $PACMain::FUNCS{_MAIN}{_GUI}{screenshots}->add($screenshot_file, $$self{_CFG}{'environments'}{$$self{_UUID}});
                 $PACMain::FUNCS{_MAIN}->_updateGUIPreferences();
 
+                delete $$self{_TAKE_SCREENSHOT};
                 return 0;
 
             });
@@ -4685,13 +4699,15 @@ sub _zoomHandler {
 
     if ($action eq 'zoomin') {
         $zoom = 1;
-        $scale = (100*$scale + 10)/100;
+        $scale = (int($scale * 100 + 0.5) + 10) / 100;
+        $scale = 5.0 if $scale > 5.0;
     } elsif ($action eq 'zoomout') {
         $zoom = 1;
-        $scale = (100*$scale - 10)/100;
+        $scale = (int($scale * 100 + 0.5) - 10) / 100;
+        $scale = 0.2 if $scale < 0.2;
     } elsif ($action eq 'zoomreset') {
         $zoom = 1;
-        $scale = 1;
+        $scale = 1.0;
     }
     if ($zoom) {
         $$self{_GUI}{_VTE}->set_font_scale($scale);
@@ -4808,6 +4824,10 @@ sub closeLog {
 
     if (!$self->{_LOG}{enabled}) {
         return 0;
+    }
+    if (defined $self->{_LOG}{timeout}) {
+        eval { Glib::Source->remove($self->{_LOG}{timeout}); };
+        delete $self->{_LOG}{timeout};
     }
     $self->saveLog(1);
     close LOG;

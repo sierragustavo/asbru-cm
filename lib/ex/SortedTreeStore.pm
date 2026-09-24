@@ -159,42 +159,55 @@ sub __treeSort {
     my ($treestore, $a_iter, $b_iter, $self) = @_;
     my $cfg = $$self{_CFG};
 
-    my $groups_1st = $$cfg{'defaults'}{'sort groups first'} // 1;
-    my $b_uuid = $treestore->get_value($b_iter, 2);
-    my $a_name = $treestore->get_value($a_iter, 1);
-    my $b_name = $treestore->get_value($b_iter, 1);
-    if (!defined $b_uuid) {
-        return 0;
-    }
-    $a_name =~ s/<.*?> ?//g;
-    $b_name =~ s/<.*?> ?//g;
-    # __PAC__ROOT__ must always be the first node!!
-    if ($b_uuid eq '__PAC__ROOT__') {
-        return 1;
-    }
-
     my $a_uuid = $treestore->get_value($a_iter, 2);
-    if (!defined $a_uuid) {
-        return 1;
-    }
+    my $b_uuid = $treestore->get_value($b_iter, 2);
+
+    return 1 if (!defined $a_uuid);
+    return -1 if (!defined $b_uuid);
+
     # __PAC__ROOT__ must always be the first node!!
-    if ($a_uuid eq '__PAC__ROOT__') {
-        return -1;
-    }
+    return -1 if ($a_uuid eq '__PAC__ROOT__');
+    return 1 if ($b_uuid eq '__PAC__ROOT__');
+
+    my $a_node = $$cfg{'environments'}{$a_uuid};
+    my $b_node = $$cfg{'environments'}{$b_uuid};
 
     # Groups first...
+    my $groups_1st = $$cfg{'defaults'}{'sort groups first'} // 1;
     if ($groups_1st) {
-        my $a_is_group = $$cfg{'environments'}{ $a_uuid }{'_is_group'};
-        my $b_is_group = $$cfg{'environments'}{ $b_uuid }{'_is_group'};
-        if ($a_is_group && ! $b_is_group){
+        my $a_is_group = (ref($a_node) eq 'HASH') ? ($$a_node{'_is_group'} // 0) : 0;
+        my $b_is_group = (ref($b_node) eq 'HASH') ? ($$b_node{'_is_group'} // 0) : 0;
+        if ($a_is_group && !$b_is_group) {
             return -1;
         }
-        if (! $a_is_group && $b_is_group){
+        if (!$a_is_group && $b_is_group) {
             return 1;
         }
     }
+
+    # Compare names using memoized lowercase strings to eliminate tens of thousands of lc() calls during sort
+    my $a_name_lc;
+    if (ref($a_node) eq 'HASH') {
+        $a_name_lc = ($$a_node{'_name_lc'} //= lc($$a_node{'name'} // ''));
+    }
+    if (!defined $a_name_lc || $a_name_lc eq '') {
+        my $val = $treestore->get_value($a_iter, 1) // '';
+        $val =~ s/<.*?> ?//g if ($val =~ /</);
+        $a_name_lc = lc($val);
+    }
+
+    my $b_name_lc;
+    if (ref($b_node) eq 'HASH') {
+        $b_name_lc = ($$b_node{'_name_lc'} //= lc($$b_node{'name'} // ''));
+    }
+    if (!defined $b_name_lc || $b_name_lc eq '') {
+        my $val = $treestore->get_value($b_iter, 1) // '';
+        $val =~ s/<.*?> ?//g if ($val =~ /</);
+        $b_name_lc = lc($val);
+    }
+
     # ... then alphabetically
-    return lc($a_name) cmp lc($b_name);
+    return $a_name_lc cmp $b_name_lc;
 }
 # END: Private functions definitions
 ###################################################################

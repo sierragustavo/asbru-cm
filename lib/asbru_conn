@@ -1268,8 +1268,9 @@ if (defined $METHOD) {
             # /wm-class gives each session a unique X11 class name so multiple
             # simultaneous RDP windows can be identified without XID collisions
             my $_wm_class = "/wm-class:asbru-rdp-$UUID";
-            $connection_cmd = "$METHOD /parent-window:$$CFG{'tmp'}{'xid'} $_wm_class /size:$$CFG{'tmp'}{'width'}x$$CFG{'tmp'}{'height'} $CONNECT_OPTS" . ($MANUAL ? '' : " /u:'$USER' /p:'$PASS'") . " /v:$IP:$PORT";
-            $connection_txt = "$METHOD /parent-window:$$CFG{'tmp'}{'xid'} $_wm_class /size:$$CFG{'tmp'}{'width'}x$$CFG{'tmp'}{'height'} $CONNECT_OPTS" . ($MANUAL ? '' : " /u:'$USER' /p:'<<hidden_password>>'") . " /v:$IP:$PORT";
+            my $_freerdp_hidpi = PACWayland::freerdp_hidpi_opts();
+            $connection_cmd = "$METHOD /parent-window:$$CFG{'tmp'}{'xid'} $_wm_class /size:$$CFG{'tmp'}{'width'}x$$CFG{'tmp'}{'height'} $_freerdp_hidpi $CONNECT_OPTS" . ($MANUAL ? '' : " /u:'$USER' /p:'$PASS'") . " /v:$IP:$PORT";
+            $connection_txt = "$METHOD /parent-window:$$CFG{'tmp'}{'xid'} $_wm_class /size:$$CFG{'tmp'}{'width'}x$$CFG{'tmp'}{'height'} $_freerdp_hidpi $CONNECT_OPTS" . ($MANUAL ? '' : " /u:'$USER' /p:'<<hidden_password>>'") . " /v:$IP:$PORT";
         } elsif (defined $$CFG{'tmp'}{'xid'}) {
             $connection_cmd = "$METHOD /parent-window:$$CFG{'tmp'}{'xid'} /size:$$CFG{'tmp'}{'width'}x$$CFG{'tmp'}{'height'} $CONNECT_OPTS" . ($MANUAL ? '' : " /u:'$USER' /p:'$PASS'") . " /v:$IP:$PORT";
             $connection_txt = "$METHOD /parent-window:$$CFG{'tmp'}{'xid'} /size:$$CFG{'tmp'}{'width'}x$$CFG{'tmp'}{'height'} $CONNECT_OPTS" . ($MANUAL ? '' : " /u:'$USER' /p:'<<hidden_password>>'") . " /v:$IP:$PORT";

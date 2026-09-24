@@ -148,7 +148,8 @@ sub update {
         my $total_conn = 0;
         my $total_time = 0;
 
-        foreach my $tmpuuid ($PACMain::FUNCS{_MAIN}{_GUI}{treeConnections}->_getChildren($uuid, 'all', 1) ) {
+        my @group_children = _getGroupDescendants($cfg, $uuid);
+        foreach my $tmpuuid (@group_children) {
             if ($$cfg{'environments'}{$tmpuuid}{_is_group}) {
                 $groups++;
                 $total_conn += ($$self{statistics}{$tmpuuid}{total_conn} // 0);
@@ -336,7 +337,7 @@ sub _buildStatisticsGUI {
             }
         } elsif ($$cfg{environments}{$uuid}{_is_group}) {
             if (_wConfirm($PACMain::FUNCS{_MAIN}{_GUI}{main}, "Are you sure you want to reset statistics for group:\n\n<b>@{[__($name)]}</b>\n\nThis action can not be undone!")) {
-                foreach my $child ($PACMain::FUNCS{_MAIN}{_GUI}{treeConnections}->_getChildren($uuid, 0, 1)) {
+                foreach my $child (_getGroupDescendants($cfg, $uuid)) {
                     $$self{statistics}{$child}{start} = 0;
                     $$self{statistics}{$child}{stop} = 0;
                     $$self{statistics}{$child}{total_conn} = 0;
@@ -357,6 +358,24 @@ sub _buildStatisticsGUI {
     });
 
     return 1;
+}
+
+sub _getGroupDescendants {
+    my ($cfg, $uuid) = @_;
+    my @descendants;
+    my @queue = ($uuid);
+    my %seen;
+    while (@queue) {
+        my $curr = shift @queue;
+        next if $seen{$curr}++;
+        foreach my $child_uuid (keys %{ $$cfg{environments}{$curr}{children} // {} }) {
+            push @descendants, $child_uuid;
+            if ($$cfg{environments}{$child_uuid}{_is_group}) {
+                push @queue, $child_uuid;
+            }
+        }
+    }
+    return @descendants;
 }
 
 # END: Private functions definitions

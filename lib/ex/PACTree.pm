@@ -94,7 +94,38 @@ sub _getChildren {
     my $deep = shift // 0;      # 0:1st_level, 1:all_levels
     my $hash = shift // 0;
 
+    # Try ultra-fast in-memory lookup first if config environments is available
+    my $cfg = $PACMain::FUNCS{_MAIN}{_CFG};
+    if ($cfg && $cfg->{environments} && defined $uuid && exists $cfg->{environments}{$uuid}) {
+        my @list;
+        my $collect;
+        $collect = sub {
+            my $parent = shift;
+            my $children = $cfg->{environments}{$parent}{children};
+            return unless $children && ref($children) eq 'HASH';
+            foreach my $child_uuid (sort keys %$children) {
+                my $cnode = $cfg->{environments}{$child_uuid};
+                next unless $cnode;
+                my $is_grp = $cnode->{_is_group} // 0;
+                my $matches = ($which eq 'all') || ($which == 1 && $is_grp) || ($which == 0 && !$is_grp);
+                if ($matches && $child_uuid ne '__PAC__ROOT__') {
+                    if ($hash) {
+                        push @list, { name => ($cnode->{name} // ''), uuid => $child_uuid };
+                    } else {
+                        push @list, $child_uuid;
+                    }
+                }
+                if ($deep && $is_grp) {
+                    $collect->($child_uuid);
+                }
+            }
+        };
+        $collect->($uuid);
+        return wantarray ? @list : scalar(@list);
+    }
+
     my $modelsort = $self->get_model();
+    return wantarray ? () : 0 unless defined $modelsort;
     my $model = $modelsort->get_model();
 
     my @list;
@@ -131,24 +162,35 @@ sub _getPath {
     my $self = shift;
     my $uuid = shift;
 
+    return undef unless defined $uuid;
+
     my $modelsort = $self->get_model();
-    my $model = $modelsort->get_model();
+    return undef unless defined $modelsort;
 
-    my $ret_path;
-
-    # Locate every connection under $uuid
-    $modelsort->foreach(sub {
-        my ($store, $path, $iter, $tmp) = @_;
-        my $node_uuid = $store->get_value($iter, 2);
-
-        if ($node_uuid ne $uuid) {
-            return 0;
+    # Check cache first for O(1) response
+    if ($$self{_path_cache} && $$self{_path_cache}{$uuid}) {
+        my $ref = $$self{_path_cache}{$uuid};
+        if ($ref->valid()) {
+            return $ref->get_path();
         }
-        $ret_path = $path->to_string();
-        return 1;
+    }
+
+    # Populate cache for all nodes in a single O(N) pass
+    $$self{_path_cache} = {};
+    $modelsort->foreach(sub {
+        my ($store, $path, $iter) = @_;
+        my $node_uuid = $store->get_value($iter, 2);
+        if (defined $node_uuid) {
+            $$self{_path_cache}{$node_uuid} = Gtk3::TreeRowReference->new($modelsort, $path);
+        }
+        return 0;
     });
 
-    return (defined $ret_path) ? Gtk3::TreePath->new_from_string($ret_path) : undef;
+    if ($$self{_path_cache}{$uuid} && $$self{_path_cache}{$uuid}->valid()) {
+        return $$self{_path_cache}{$uuid}->get_path();
+    }
+
+    return undef;
 }
 
 sub _addNode {
@@ -159,26 +201,32 @@ sub _addNode {
     my $icon = shift;
     my $tree = shift // $$self{data};
 
+    # Invalidate path cache on structure modification
+    delete $$self{_path_cache};
+
+    # Parent group is __PAC__ROOT__
+    if ((! defined $parent_uuid) || ($parent_uuid eq '__PAC__ROOT__')) {
+        push(@{$$self{'data'}}, {value => [$icon, $gui_name, $new_uuid]});
+        return 1;
+    }
+
     foreach my $elem_hash (@{$tree}) {
         my $this_uuid = $$elem_hash{'value'}[2];
 
-        # Parent group is __PAC__ROOT__
-        if ((! defined $parent_uuid) || ($parent_uuid eq '__PAC__ROOT__') ) {
-            push(@{$$self{'data'}}, {value => [$icon, $gui_name, $new_uuid]});
-            return 1;
-        }
         # Parent group found, insert here (the TreeModelSort will order it itself)
-        elsif ($this_uuid eq $parent_uuid) {
-            splice(@{$$elem_hash{'children'}}, 0, 0, ({value => [$icon, $gui_name, $new_uuid]}) );
+        if ($this_uuid eq $parent_uuid) {
+            splice(@{$$elem_hash{'children'}}, 0, 0, ({value => [$icon, $gui_name, $new_uuid]}));
             return 1;
         }
         # Parent group not found, keep on searching in its children
-        else {
-            $self->_addNode($parent_uuid, $new_uuid, $gui_name, $icon, $$elem_hash{'children'});
+        elsif ($$elem_hash{'children'} && @{$$elem_hash{'children'}}) {
+            if ($self->_addNode($parent_uuid, $new_uuid, $gui_name, $icon, $$elem_hash{'children'})) {
+                return 1;
+            }
         }
     }
 
-    return 1;
+    return 0;
 }
 
 sub _delNode {
@@ -188,14 +236,29 @@ sub _delNode {
     my $modelsort = $self->get_model();
     my $model = $modelsort->get_model();
 
-    # Delete the given UUID from the PACTree
+    # Attempt direct deletion via path cache first
+    my $path = $self->_getPath($uuid);
+    delete $$self{_path_cache};
+
+    if ($path) {
+        my $iter = $modelsort->get_iter($path);
+        if ($iter) {
+            my $child_iter = $modelsort->convert_iter_to_child_iter($iter);
+            if ($child_iter) {
+                $model->remove($child_iter);
+                return 1;
+            }
+        }
+    }
+
+    # Fallback scan only if direct path resolution was not found
     $modelsort->foreach(sub {
-        my ($store, $path, $iter, $tmp) = @_;
+        my ($store, $p, $iter, $tmp) = @_;
         my $node_uuid = $store->get_value($iter, 2);
         if ($node_uuid ne $uuid) {
             return 0;
         }
-        $model->remove($modelsort->convert_iter_to_child_iter($modelsort->get_iter($path)));
+        $model->remove($modelsort->convert_iter_to_child_iter($modelsort->get_iter($p)));
         return 1;
     });
 
@@ -206,10 +269,9 @@ sub _focusPrevious {
     my $self        = shift;
     my $uuid        = shift;
     my $who         = shift;
-    my $NEXT        = 0;
     my $pg_expanded = 0;
     my $pg_depth    = 0;
-    my $focus       = undef;
+    my $focus_path  = undef;
 
     if (!$uuid) {
         return 0;
@@ -218,52 +280,40 @@ sub _focusPrevious {
     $model->foreach(
         sub {
             my ($store, $path, $iter) = @_;
-            my $name      = $model->get_value($model->get_iter($path), 1);
-            my $elem_uuid = $model->get_value($model->get_iter($path), 2);
-            my $group     = 0;
+            my $name      = $store->get_value($iter, 1);
+            my $elem_uuid = $store->get_value($iter, 2);
             if ($who == 2) {
                 $elem_uuid = $name;
             }
-            if ($name =~ /bold/) {
-                $group = 1;
-            }
+            my $group = ($name =~ /bold/) ? 1 : 0;
             my $expanded = $self->row_expanded($path);
-            my $str      = $path->to_string();
-            my $depth    = () = $str =~ /:/g;
+            my $depth    = $path->get_depth() - 1;
+
             if ($elem_uuid eq $uuid) {
                 return 1;
             }
             if ($group && $pg_expanded) {
-                $focus       = { name => $name, str => $str, depth => $depth, uuid => $elem_uuid };
+                $focus_path  = $path->copy();
                 $pg_depth    = $depth;
                 $pg_expanded = $expanded;
             } elsif ($group && $depth <= $pg_depth) {
-                $focus       = { name => $name, str => $str, depth => $depth, uuid => $elem_uuid };
+                $focus_path  = $path->copy();
                 $pg_expanded = $expanded;
                 $pg_depth    = $depth;
             } elsif ((!$group && $depth <= $pg_depth) || (!$group && $pg_expanded && $depth > $pg_depth)) {
-                $focus       = { name => $name, str => $str, depth => $depth, uuid => $elem_uuid };
+                $focus_path  = $path->copy();
                 $pg_depth    = $depth;
                 $pg_expanded = 0;
             }
             return 0;
         }
     );
-    $model->foreach(
-        sub {
-            my ($store, $path, $iter) = @_;
-            my $name      = $model->get_value($model->get_iter($path), 1);
-            my $elem_uuid = $model->get_value($model->get_iter($path), 2);
-            if ($who == 2) {
-                $elem_uuid = $name;
-            }
-            if ($$focus{uuid} eq $elem_uuid) {
-                $self->set_cursor($path, undef, 0);
-                return 1;
-            }
-            return 0;
-        }
-    );
+
+    if ($focus_path) {
+        $self->set_cursor($focus_path, undef, 0);
+        return 1;
+    }
+
     return 0;
 }
 
@@ -280,26 +330,19 @@ sub _focusNext {
     my $model = $self->get_model();
     $model->foreach(
         sub {
-            my ($name, $elem_uuid);
             my ($store, $path, $iter) = @_;
-            my $name      = $model->get_value($model->get_iter($path), 1);
-            my $elem_uuid = $model->get_value($model->get_iter($path), 2);
+            my $name      = $store->get_value($iter, 1);
+            my $elem_uuid = $store->get_value($iter, 2);
             if ($who == 2) {
                 $elem_uuid = $name;
             }
-            my $group = 0;
-            if ($name =~ /bold/) {
-                $group = 1;
-            }
+            my $group = ($name =~ /bold/) ? 1 : 0;
             my $expanded = $self->row_expanded($path);
-            my $str      = $path->to_string();
-            my $depth    = () = $str =~ /:/g;
+            my $depth    = $path->get_depth() - 1;
+
             if ($who && $uuid eq '__PAC__ROOT__') {
                 $NEXT  = 1;
                 $level = 99;
-            }
-            if ($who == 2) {
-
             }
             if ($NEXT) {
                 if ($depth <= $level) {
@@ -326,24 +369,16 @@ sub _setTreeFocus {
     my $self = shift;
     my $uuid = shift;
 
-    my $model = $self->get_model();
+    return 0 unless defined $uuid;
 
-    $model->foreach(sub {
-        my ($store, $path, $iter) = @_;
-
-        my $elem_uuid = $model->get_value($model->get_iter($path), 2);
-
-        if ($elem_uuid ne $uuid) {
-            return 0;
-        }
-
+    my $path = $self->_getPath($uuid);
+    if ($path) {
         $self->expand_to_path($path);
         $self->set_cursor($path, undef, 0);
-
         return 1;
-    });
+    }
 
-    return 1;
+    return 0;
 }
 # End of Ásbrú specific methods
 

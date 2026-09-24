@@ -624,6 +624,20 @@ sub _initGUI {
     $$self{_GUI}{vboxCommandPanel}->pack_start($$self{_GUI}{_vboxSearch}, 0, 1, 0);
 
     $$self{_GUI}{_entrySearch} = Gtk3::Entry->new();
+    $$self{_GUI}{_entrySearch}->set_placeholder_text(__('Search name, IP, user, group, method, tags...'));
+    eval {
+        $$self{_GUI}{_entrySearch}->set_icon_from_icon_name('primary', 'edit-find-symbolic');
+        $$self{_GUI}{_entrySearch}->set_icon_from_icon_name('secondary', 'edit-clear-symbolic');
+        $$self{_GUI}{_entrySearch}->set_icon_tooltip_text('primary', __('Search connections'));
+        $$self{_GUI}{_entrySearch}->set_icon_tooltip_text('secondary', __('Clear search'));
+        $$self{_GUI}{_entrySearch}->signal_connect('icon-press' => sub {
+            my ($widget, $icon_pos) = @_;
+            if ($icon_pos eq 'secondary') {
+                $widget->set_text('');
+                $widget->grab_focus();
+            }
+        });
+    };
     $$self{_GUI}{_vboxSearch}->pack_start($$self{_GUI}{_entrySearch}, 0, 1, 0);
     $$self{_GUI}{_entrySearch}->grab_focus();
 
@@ -1968,10 +1982,16 @@ sub _setupCallbacks {
     $$self{_GUI}{connSearch}->signal_connect('clicked' => sub {
         if (!$$self{_GUI}{_vboxSearch}->get_visible) {
             $$self{_SHOWFINDTREE} = 1;
+            $$self{_GUI}{nbTree}->set_current_page(0) if ($$self{_GUI}{nbTree}->get_current_page() != 0);
             $$self{_GUI}{_vboxSearch}->show();
             $$self{_GUI}{_entrySearch}->grab_focus();
         } else {
+            if ($$self{_search_timer_id}) {
+                Glib::Source->remove($$self{_search_timer_id});
+                delete $$self{_search_timer_id};
+            }
             $$self{_SHOWFINDTREE} = 0;
+            $$self{_GUI}{_entrySearch}->set_text('');
             $$self{_GUI}{_vboxSearch}->hide();
         }
     });
@@ -1982,6 +2002,10 @@ sub _setupCallbacks {
         my $action = $FUNCS{_KEYBINDS}->GetAction('pactabs', $widget, $event);
 
         if ($action eq 'Escape') {
+            if ($$self{_search_timer_id}) {
+                Glib::Source->remove($$self{_search_timer_id});
+                delete $$self{_search_timer_id};
+            }
             $$self{_SHOWFINDTREE} = 0;
             $$self{_GUI}{_entrySearch}->set_text('');
             $$self{_GUI}{_vboxSearch}->hide();
@@ -1994,32 +2018,48 @@ sub _setupCallbacks {
             $self->_searchForward();
             return 1;
         }
-        return 0
+        return 0;
     });
 
     $$self{_GUI}{_entrySearch}->signal_connect('activate' => sub {
+        if ($$self{_search_timer_id}) {
+            Glib::Source->remove($$self{_search_timer_id});
+            delete $$self{_search_timer_id};
+            $self->_performSearch();
+        }
         my @sel = $$self{_GUI}{treeConnections}->_getSelectedUUIDs();
         if ((scalar(@sel)==1)&&($sel[0] ne '__PAC__ROOT__')&&(!$$self{_CFG}{'environments'}{$sel[0]}{'_is_group'})&&($$self{_GUI}{_entrySearch}->get_chars(0, -1) ne '')) {
             $$self{_GUI}{connExecBtn}->clicked();
         }
     });
     $$self{_GUI}{_entrySearch}->signal_connect('focus_out_event' => sub {
+        if ($$self{_search_timer_id}) {
+            Glib::Source->remove($$self{_search_timer_id});
+            delete $$self{_search_timer_id};
+        }
         $$self{_SHOWFINDTREE} = 0;
         $$self{_GUI}{_vboxSearch}->hide();
         $$self{_GUI}{_entrySearch}->set_text('');
+        return 0;
     });
     $$self{_GUI}{_entrySearch}->signal_connect('changed' => sub {
         my $text = $$self{_GUI}{_entrySearch}->get_chars(0, -1);
+        if ($$self{_search_timer_id}) {
+            Glib::Source->remove($$self{_search_timer_id});
+            delete $$self{_search_timer_id};
+        }
         if ($text eq '') {
+            $$self{_GUI}{_RESULT} = [];
+            $$self{_GUI}{_ACTUAL} = 0;
+            $self->_updateSearchFeedback(0, 0);
             return 0;
         }
-        $$self{_GUI}{_RESULT} = $self->__search($text, $$self{_GUI}{treeConnections});
-        $$self{_GUI}{_ACTUAL} = 0;
-        if (@{ $$self{_GUI}{_RESULT} }) {
-            $$self{_GUI}{treeConnections}->_setTreeFocus($$self{_GUI}{_RESULT}[ $$self{_GUI}{_ACTUAL} ]);
-        } else {
-            $$self{_GUI}{treeConnections}->_setTreeFocus('__PAC__ROOT__');
-        }
+        # Debounce keystrokes (60ms) for high performance and responsiveness
+        $$self{_search_timer_id} = Glib::Timeout->add(60, sub {
+            delete $$self{_search_timer_id};
+            $self->_performSearch();
+            return 0;
+        });
         return 0;
     });
 
@@ -2392,28 +2432,33 @@ sub _setupCallbacks {
 
 sub _searchBackward {
     my ($self) = @_;
-    if (!@{ $$self{_GUI}{_RESULT} }) {
+    my $total = scalar(@{ $$self{_GUI}{_RESULT} // [] });
+    if (!$total) {
         return 1;
     }
     if ($$self{_GUI}{_ACTUAL} == 0) {
-        $$self{_GUI}{_ACTUAL} = $#{ $$self{_GUI}{_RESULT} };
+        $$self{_GUI}{_ACTUAL} = $total - 1;
     } else {
         $$self{_GUI}{_ACTUAL}--;
     }
     $$self{_GUI}{treeConnections}->_setTreeFocus($$self{_GUI}{_RESULT}[ $$self{_GUI}{_ACTUAL} ]);
+    $self->_updateSearchFeedback($$self{_GUI}{_ACTUAL} + 1, $total);
+    return 1;
 }
 
 sub _searchForward {
     my ($self) = @_;
-    if (!@{ $$self{_GUI}{_RESULT} }) {
+    my $total = scalar(@{ $$self{_GUI}{_RESULT} // [] });
+    if (!$total) {
         return 1;
     }
-    if ($$self{_GUI}{_ACTUAL} == $#{ $$self{_GUI}{_RESULT} }) {
+    if ($$self{_GUI}{_ACTUAL} == $total - 1) {
         $$self{_GUI}{_ACTUAL} = 0;
     } else {
         $$self{_GUI}{_ACTUAL}++;
     }
     $$self{_GUI}{treeConnections}->_setTreeFocus($$self{_GUI}{_RESULT}[ $$self{_GUI}{_ACTUAL} ]);
+    $self->_updateSearchFeedback($$self{_GUI}{_ACTUAL} + 1, $total);
     return 1;
 }
 
@@ -2535,57 +2580,207 @@ sub _unlockAsbru {
     return 1;
 }
 
+sub _performSearch {
+    my ($self) = @_;
+    return unless $$self{_GUI}{_entrySearch};
+
+    my $text = $$self{_GUI}{_entrySearch}->get_chars(0, -1);
+    if ($text eq '') {
+        $$self{_GUI}{_RESULT} = [];
+        $$self{_GUI}{_ACTUAL} = 0;
+        $self->_updateSearchFeedback(0, 0);
+        return;
+    }
+
+    $$self{_GUI}{_RESULT} = $self->__search($text, $$self{_GUI}{treeConnections});
+    $$self{_GUI}{_ACTUAL} = 0;
+
+    my $count = scalar(@{ $$self{_GUI}{_RESULT} // [] });
+    if ($count > 0) {
+        $$self{_GUI}{treeConnections}->_setTreeFocus($$self{_GUI}{_RESULT}[0]);
+        $self->_updateSearchFeedback(1, $count);
+    } else {
+        $$self{_GUI}{treeConnections}->_setTreeFocus('__PAC__ROOT__');
+        $self->_updateSearchFeedback(0, 0);
+    }
+}
+
+sub _updateSearchFeedback {
+    my ($self, $current, $total) = @_;
+    return unless $$self{_GUI}{_entrySearch};
+
+    if ($total > 0) {
+        my $info = sprintf(__("Match %d of %d (Tab/Down: next, Shift+Tab/Up: prev, Enter: connect)"), $current, $total);
+        $$self{_GUI}{_entrySearch}->set_tooltip_text($info);
+        eval {
+            $$self{_GUI}{_entrySearch}->set_icon_tooltip_text('primary', sprintf(__("%d of %d matches"), $current, $total));
+        };
+    } else {
+        my $text = $$self{_GUI}{_entrySearch}->get_chars(0, -1);
+        if ($text ne '') {
+            $$self{_GUI}{_entrySearch}->set_tooltip_text(__('No matching connections found'));
+            eval {
+                $$self{_GUI}{_entrySearch}->set_icon_tooltip_text('primary', __('No matches'));
+            };
+        } else {
+            $$self{_GUI}{_entrySearch}->set_tooltip_text(__('Type to search name, IP, user, group, tags...'));
+            eval {
+                $$self{_GUI}{_entrySearch}->set_icon_tooltip_text('primary', __('Search connections'));
+            };
+        }
+    }
+}
+
+sub _getNodeGroupPath {
+    my ($self, $uuid, $cache) = @_;
+    return $cache->{$uuid} if ($cache && exists $cache->{$uuid});
+
+    my @path_parts;
+    my $curr = $$self{_CFG}{environments}{$uuid}{parent};
+    my $depth = 0;
+    while ($curr && $curr ne '__PAC__ROOT__' && exists $$self{_CFG}{environments}{$curr} && $depth < 20) {
+        my $pname = $$self{_CFG}{environments}{$curr}{name};
+        unshift(@path_parts, $pname) if defined $pname;
+        $curr = $$self{_CFG}{environments}{$curr}{parent};
+        $depth++;
+    }
+    my $path_str = join(' / ', @path_parts);
+    $cache->{$uuid} = $path_str if $cache;
+    return $path_str;
+}
+
 sub __search {
     my $self   = shift;
-    my $text   = shift;
+    my $text   = shift // '';
     my $tree   = shift;
-    my %groups = ();
-    my $follow = '';
 
     my @result;
-    my $model = $tree->get_model();
-    if (length($text) < 2) {
-        return \@result;
+    $text =~ s/^\s+|\s+$//g;
+    return \@result if ($text eq '');
+
+    my $query_lc = lc($text);
+    my @terms = grep { length($_) > 0 } split(/\s+/, $query_lc);
+    return \@result unless @terms;
+
+    my @term_matchers;
+    foreach my $t (@terms) {
+        my $sub_qr = qr/\Q$t\E/i;
+        my $pat = join('.*', map { quotemeta($_) } split(//, $t));
+        my $fuzzy_qr = (length($t) > 1 && length($t) <= 20)
+            ? qr/$pat/i
+            : $sub_qr;
+        push(@term_matchers, { raw => $t, sub_qr => $sub_qr, fuzzy_qr => $fuzzy_qr });
     }
-    my @words = split / /, $text;
-    $model->foreach(
-        sub {
-            my ($store, $path, $iter) = @_;
-            my $name      = $model->get_value($model->get_iter($path), 1);
-            my $elem_uuid = $model->get_value($model->get_iter($path), 2);
-            my $str       = $path->to_string();
-            my $search    = '';
-            my $group     = 0;
-            if ($name =~ /bold/) {
-                $group = 1;
+
+    my @scored_matches;
+    my %envs = %{ $$self{_CFG}{environments} // {} };
+    my %gpath_cache;
+
+    foreach my $uuid (keys %envs) {
+        next if ($uuid eq '__PAC_SHELL__' || $uuid eq '__PAC__ROOT__');
+        my $node = $envs{$uuid};
+        next unless ref($node) eq 'HASH';
+
+        my $is_group   = $$node{'_is_group'} // 0;
+        my $name       = $$node{'name'} // '';
+        my $ip         = $$node{'ip'} // '';
+        my $user       = $$node{'user'} // '';
+        my $title      = $$node{'title'} // '';
+        my $method     = $$node{'method'} // '';
+        my $port       = $$node{'port'} // '';
+        my $desc       = $$node{'description'} // '';
+        my $group_path = $self->_getNodeGroupPath($uuid, \%gpath_cache);
+
+        my $name_lc  = lc($name);
+        my $ip_lc    = lc($ip);
+        my $user_lc  = lc($user);
+        my $gpath_lc = lc($group_path);
+        my $title_lc = lc($title);
+        my $meth_lc  = lc($method);
+        my $port_lc  = lc("$port");
+        my $desc_lc  = lc($desc);
+
+        my $combined = "$name_lc $ip_lc $user_lc $gpath_lc $title_lc $meth_lc $port_lc $desc_lc";
+
+        my $all_matched = 1;
+        my $score = 0;
+
+        foreach my $m (@term_matchers) {
+            my $raw      = $$m{raw};
+            my $sub_qr   = $$m{sub_qr};
+            my $fuzzy_qr = $$m{fuzzy_qr};
+
+            my $term_matched = 0;
+
+            # 1. Exact match on primary fields
+            if ($name_lc eq $raw || $ip_lc eq $raw) {
+                $score += 200;
+                $term_matched = 1;
             }
-            $name =~ s/<.+?> ?//g;
-            if ($group && !$groups{$str}) {
-                $groups{$str} = $name;
+            # 2. Prefix match on primary fields
+            elsif ($name_lc =~ /^$sub_qr/ || $ip_lc =~ /^$sub_qr/) {
+                $score += 100;
+                $term_matched = 1;
             }
-            foreach my $g (sort keys %groups) {
-                if ($str =~ /^$g/) {
-                    $search .= "$groups{$g} ";
-                }
+            elsif ($user_lc =~ /^$sub_qr/) {
+                $score += 70;
+                $term_matched = 1;
             }
-            foreach my $f ('name', 'title', 'ip') {
-                my $v = $$self{_CFG}{environments}{$elem_uuid}{$f} // '';
-                if ($f eq 'ip') {
-                    $v =~ s/\.\w+$//;
-                    $v =~ s/\.(?:com|org|edu|net|info|go[bv])$//;
-                }
-                $search .= "$v ";
+            # 3. Substring match on name / IP
+            elsif ($name_lc =~ /$sub_qr/ || $ip_lc =~ /$sub_qr/) {
+                $score += 50;
+                $term_matched = 1;
             }
-            chop $search;
-            foreach my $w (@words) {
-                if ($search !~ /$w/i) {
-                    return 0;
-                }
+            # 4. Substring match on user / group path
+            elsif ($user_lc =~ /$sub_qr/ || $gpath_lc =~ /$sub_qr/) {
+                $score += 30;
+                $term_matched = 1;
             }
-            push(@result, $elem_uuid);
-            return 0;
+            # 5. Substring match on title / method / port / desc
+            elsif ($combined =~ /$sub_qr/) {
+                $score += 20;
+                $term_matched = 1;
+            }
+            # 6. Fuzzy subsequence match on name / IP / group
+            elsif ($name_lc =~ /$fuzzy_qr/ || $ip_lc =~ /$fuzzy_qr/ || $gpath_lc =~ /$fuzzy_qr/) {
+                $score += 10;
+                $term_matched = 1;
+            }
+
+            if (!$term_matched) {
+                $all_matched = 0;
+                last;
+            }
         }
-    );
+
+        next unless $all_matched;
+
+        # Whole query exact and prefix bonuses
+        if ($name_lc eq $query_lc || $ip_lc eq $query_lc) {
+            $score += 100;
+        } elsif ($name_lc =~ /^\Q$query_lc\E/) {
+            $score += 50;
+        }
+
+        # Bonus for leaf connections vs pure groups
+        if (!$is_group) {
+            $score += 5;
+        }
+
+        # Compactness bonus for shorter matching names
+        if (length($name) > 0) {
+            $score += int(10 / (1 + abs(length($name) - length($text))));
+        }
+
+        push(@scored_matches, { uuid => $uuid, score => $score, name => $name });
+    }
+
+    # Sort by score DESC, then name ASC
+    @scored_matches = sort {
+        $$b{score} <=> $$a{score} || lc($$a{name}) cmp lc($$b{name})
+    } @scored_matches;
+
+    @result = map { $$_{uuid} } @scored_matches;
     return \@result;
 }
 
@@ -2626,24 +2821,35 @@ sub _hasProtectedChildren {
     my $uuids = shift;
     my $search_children = shift // 1;
 
-    my $with_protected = 0;
+    my $envs = $$self{_CFG}{'environments'};
+    return 0 unless $envs;
 
     foreach my $uuid (@{ $uuids }) {
-        if ($$self{_CFG}{'environments'}{$uuid}{'_is_group'}) {
-            if (!$search_children) {
-                next;
-            }
-            foreach my $child ($$self{_GUI}{treeConnections}->_getChildren($uuid, 'all', 1)) {
-                if ($with_protected = ($$self{_CFG}{'environments'}{$child}{'_protected'} // 0) || 0) {
-                    last;
+        my $node = $envs->{$uuid};
+        next unless $node;
+        if ($node->{'_protected'}) {
+            return 1;
+        }
+        if ($search_children && $node->{'_is_group'}) {
+            my @queue = ($uuid);
+            while (my $parent = shift @queue) {
+                my $children = $envs->{$parent}{'children'};
+                next unless $children && ref($children) eq 'HASH';
+                foreach my $child_uuid (keys %$children) {
+                    my $cnode = $envs->{$child_uuid};
+                    next unless $cnode;
+                    if ($cnode->{'_protected'}) {
+                        return 1;
+                    }
+                    if ($cnode->{'_is_group'}) {
+                        push @queue, $child_uuid;
+                    }
                 }
             }
-        } elsif ($with_protected = ($$self{_CFG}{'environments'}{$uuid}{'_protected'} // 0) || 0) {
-            last;
         }
     }
 
-    return $with_protected;
+    return 0;
 }
 
 sub __treeToggleProtection {
@@ -3580,15 +3786,18 @@ sub _readConfiguration {
     }
 
     if ($continue && -f $CFG_FILE_NFREEZE) {
-        eval { $$self{_CFG} = retrieve($CFG_FILE_NFREEZE); };
-        if ($@) {
-            print STDERR "WARNING: There were errors reading '$CFG_FILE_NFREEZE' config file: $@\n";
-        } else {
-            print STDERR "INFO: Used config file '$CFG_FILE_NFREEZE'\n";
-            if ($R_CFG_FILE) {
-                nstore($$self{_CFG}, $R_CFG_FILE) or die "ERROR: Could not save remote config file '$R_CFG_FILE': $!";
+        my $yaml_newer = (-f $CFG_FILE && (stat($CFG_FILE))[9] > (stat($CFG_FILE_NFREEZE))[9]);
+        if (!$yaml_newer) {
+            eval { $$self{_CFG} = retrieve($CFG_FILE_NFREEZE); };
+            if ($@) {
+                print STDERR "WARNING: There were errors reading '$CFG_FILE_NFREEZE' config file: $@\n";
+            } else {
+                print STDERR "INFO: Used config file '$CFG_FILE_NFREEZE'\n";
+                if ($R_CFG_FILE) {
+                    nstore($$self{_CFG}, $R_CFG_FILE) or die "ERROR: Could not save remote config file '$R_CFG_FILE': $!";
+                }
+                $continue = 0;
             }
-            $continue = 0;
         }
     }
 
@@ -3696,14 +3905,18 @@ sub _loadTreeConfiguration {
     my $group = shift;
     my $tree = shift // $$self{_GUI}{treeConnections};
 
-    @{ $$self{_GUI}{treeConnections}{'data'} } =
-    ({
-        value => [ $GROUPICON_ROOT, '<b>My Connections</b>', '__PAC__ROOT__' ],
-        children => []
-    });
+    # Construct complete tree structure in RAM first to avoid incremental GTK TiedTree updates
+    my @tree_data = (
+        {
+            value => [ $GROUPICON_ROOT, '<b>My Connections</b>', '__PAC__ROOT__' ],
+            children => []
+        }
+    );
     foreach my $child (keys %{ $$self{_CFG}{environments}{'__PAC__ROOT__'}{children} }) {
-        push(@{ $$tree{data} }, $self->__recurLoadTree($child));
+        push(@tree_data, $self->__recurLoadTree($child));
     }
+
+    @{ $$self{_GUI}{treeConnections}{'data'} } = @tree_data;
 
     # Select the root path
     $tree->set_cursor($tree->_getPath('__PAC__ROOT__'), undef, 0);
@@ -3918,19 +4131,31 @@ sub _updateGUIWithUUID {
         $$self{_GUI}{descBuffer}->set_text("$$self{_CFG}{'environments'}{$uuid}{'description'}");
     }
 
-    if ($$self{_CFG}{'defaults'}{'show statistics'}) {
-        $$self{_GUI}{statistics}->update($uuid, $$self{_CFG});
-        $$self{_GUI}{frameStatistics}->show();
-    } else {
-        $$self{_GUI}{frameStatistics}->hide();
+    # Debounce heavy widget updates (statistics & screenshots) to ensure smooth tree navigation
+    if (defined $$self{_details_timer_id}) {
+        Glib::Source->remove($$self{_details_timer_id});
+        $$self{_details_timer_id} = undef;
     }
 
-    if ($$self{_CFG}{'defaults'}{'show screenshots'}) {
-        $$self{_GUI}{screenshots}->update($$self{_CFG}{'environments'}{$uuid}, $uuid);
-        $$self{_GUI}{frameScreenshots}->show_all();
-    } else {
-        $$self{_GUI}{frameScreenshots}->hide();
-    }
+    $$self{_details_timer_id} = Glib::Timeout->add(40, sub {
+        delete $$self{_details_timer_id};
+
+        if ($$self{_CFG}{'defaults'}{'show statistics'}) {
+            $$self{_GUI}{statistics}->update($uuid, $$self{_CFG});
+            $$self{_GUI}{frameStatistics}->show();
+        } else {
+            $$self{_GUI}{frameStatistics}->hide();
+        }
+
+        if ($$self{_CFG}{'defaults'}{'show screenshots'}) {
+            $$self{_GUI}{screenshots}->update($$self{_CFG}{'environments'}{$uuid}, $uuid);
+            $$self{_GUI}{frameScreenshots}->show_all();
+        } else {
+            $$self{_GUI}{frameScreenshots}->hide();
+        }
+
+        return 0;
+    });
 
     return 1;
 }
@@ -3982,12 +4207,36 @@ sub _updateGUIPreferences {
     $$self{_GUI}{connFavourite}->set_image(Gtk3::Image->new_from_stock('asbru-favourite-' . ($$self{_CFG}{'environments'}{$uuid}{'favourite'} ? 'on' : 'off'), 'button'));
     $$self{_NO_PROPAGATE_FAV_TOGGLE} = 0;
 
-    $$self{_GUI}{nb}->set_tab_pos($$self{_CFG}{'defaults'}{'tabs position'});
-    $$self{_GUI}{treeConnections}->set_enable_tree_lines($$self{_CFG}{'defaults'}{'enable tree lines'});
-    $$self{_GUI}{scroll1}->set_overlay_scrolling($$self{_CFG}{'defaults'}{'tree overlay scrolling'});
-    $$self{_GUI}{descView}->modify_font(Pango::FontDescription::from_string($$self{_CFG}{'defaults'}{'info font'}));
+    # Apply layout preferences only when changed to avoid layout thrashing on row navigation
+    my $cfg_tab_pos = $$self{_CFG}{'defaults'}{'tabs position'};
+    if (!defined $$self{_applied_tab_pos} || $$self{_applied_tab_pos} ne $cfg_tab_pos) {
+        $$self{_GUI}{nb}->set_tab_pos($cfg_tab_pos);
+        $$self{_applied_tab_pos} = $cfg_tab_pos;
+    }
 
-    !$$self{_GUI}{main}->get_visible() || $$self{_CFG}{defaults}{'show tray icon'} ? $$self{_TRAY}->set_active() : $$self{_TRAY}->set_passive();
+    my $cfg_tree_lines = $$self{_CFG}{'defaults'}{'enable tree lines'} // 0;
+    if (!defined $$self{_applied_tree_lines} || $$self{_applied_tree_lines} ne $cfg_tree_lines) {
+        $$self{_GUI}{treeConnections}->set_enable_tree_lines($cfg_tree_lines);
+        $$self{_applied_tree_lines} = $cfg_tree_lines;
+    }
+
+    my $cfg_overlay = $$self{_CFG}{'defaults'}{'tree overlay scrolling'} // 0;
+    if (!defined $$self{_applied_overlay} || $$self{_applied_overlay} ne $cfg_overlay) {
+        $$self{_GUI}{scroll1}->set_overlay_scrolling($cfg_overlay);
+        $$self{_applied_overlay} = $cfg_overlay;
+    }
+
+    my $cfg_font = $$self{_CFG}{'defaults'}{'info font'};
+    if (defined $cfg_font && (!defined $$self{_applied_info_font} || $$self{_applied_info_font} ne $cfg_font)) {
+        $$self{_GUI}{descView}->modify_font(Pango::FontDescription::from_string($cfg_font));
+        $$self{_applied_info_font} = $cfg_font;
+    }
+
+    my $tray_state = (!$$self{_GUI}{main}->get_visible() || $$self{_CFG}{defaults}{'show tray icon'}) ? 1 : 0;
+    if (!defined $$self{_applied_tray_state} || $$self{_applied_tray_state} ne $tray_state) {
+        $tray_state ? $$self{_TRAY}->set_active() : $$self{_TRAY}->set_passive();
+        $$self{_applied_tray_state} = $tray_state;
+    }
 
     $$self{_GUI}{lockApplicationBtn}->set_sensitive($$self{_CFG}{'defaults'}{'use gui password'});
 
@@ -4097,13 +4346,14 @@ sub _updateGUIClusters {
 sub _updateClustersList {
     my $self = shift;
 
-    @{ $$self{_GUI}{treeClusters}{data} } = ();
+    my @clu_data;
     foreach my $ac (sort { $a cmp $b } keys %{ $$self{_CFG}{defaults}{'auto cluster'} }) {
-        push(@{ $$self{_GUI}{treeClusters}{data} }, ({ value => [ $AUTOCLUSTERICON, $ac ]}));
+        push(@clu_data, { value => [ $AUTOCLUSTERICON, $ac ] });
     }
     foreach my $cluster (sort { $a cmp $b } keys %{ $$self{_CLUSTER}->getCFGClusters() }) {
-        push(@{ $$self{_GUI}{treeClusters}{data} }, ({ value => [ $CLUSTERICON, $cluster ]}));
+        push(@clu_data, { value => [ $CLUSTERICON, $cluster ] });
     }
+    @{ $$self{_GUI}{treeClusters}{data} } = @clu_data;
 
     return 1;
 }
@@ -4112,22 +4362,23 @@ sub _updateFavouritesList {
     my $self = shift;
     my ($name);
 
-    @{ $$self{_GUI}{treeFavourites}{data} } = ();
+    my @fav_data;
     foreach my $uuid (keys %{ $$self{_CFG}{'environments'} }) {
         if (!$$self{_CFG}{'environments'}{$uuid}{'favourite'}) {
             next;
         }
         my $icon = $$self{_METHODS}{ $$self{_CFG}{'environments'}{$uuid}{'method'} }{'icon'};
         my $group = $$self{_CFG}{'environments'}{$uuid}{'parent'};
-        if ($group) {
-            $name = __($$self{_CFG}{'environments'}{$uuid}{'name'});
-            $group = __("$$self{_CFG}{'environments'}{$group}{'name'} : ");
-            $name = "$group$name";
+        my $node_name = __($$self{_CFG}{'environments'}{$uuid}{'name'});
+        if ($group && exists $$self{_CFG}{'environments'}{$group}) {
+            my $grp_name = __($$self{_CFG}{'environments'}{$group}{'name'} // '');
+            $name = "$grp_name : $node_name";
         } else {
-            $name = __($$self{_CFG}{'environments'}{$uuid}{'name'});
+            $name = $node_name;
         }
-        push(@{ $$self{_GUI}{treeFavourites}{data} }, ({ value => [ $icon, $name, $uuid ] }));
+        push(@fav_data, { value => [ $icon, $name, $uuid ] });
     }
+    @{ $$self{_GUI}{treeFavourites}{data} } = @fav_data;
 
     $self->_updateGUIFavourites();
 
