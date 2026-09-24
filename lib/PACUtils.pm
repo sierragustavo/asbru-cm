@@ -3420,25 +3420,25 @@ sub _purgeUnusedOrMissingScreenshots {
     my %screenshots;
 
     foreach my $uuid (keys %{$$cfg{'environments'}}) {
-        my $i = 0;
-        foreach my $screenshot (@{$$cfg{'environments'}{$uuid}{'screenshots'}}) {
-            if (! -f $screenshot) {
-                splice(@{$$cfg{'environments'}{$uuid}{'screenshots'}}, $i, 1);
-            } else {
-                ++$i;
+        my @valid;
+        foreach my $screenshot (@{$$cfg{'environments'}{$uuid}{'screenshots'} // []}) {
+            if (-f $screenshot) {
+                push @valid, $screenshot;
                 $screenshots{$screenshot} = 1;
             }
         }
+        $$cfg{'environments'}{$uuid}{'screenshots'} = \@valid;
     }
 
-    opendir(my $dir, "$CFG_DIR/screenshots") or die "ERROR: Could not open dir '$CFG_DIR/screenshots' for reading: $!";
-    while (my $file = readdir($dir)) {
-        if ($file =~ /^\.|\.\.$/go) {
-            next;
+    if (opendir(my $dir, "$CFG_DIR/screenshots")) {
+        while (my $file = readdir($dir)) {
+            if ($file =~ /^\.|\.\.$/go) {
+                next;
+            }
+            defined $screenshots{"$CFG_DIR/screenshots/$file"} or unlink "$CFG_DIR/screenshots/$file";
         }
-        defined $screenshots{"$CFG_DIR/screenshots/$file"} or unlink "$CFG_DIR/screenshots/$file";
+        closedir $dir;
     }
-    closedir $dir;
 
     return 1;
 }
@@ -3446,12 +3446,13 @@ sub _purgeUnusedOrMissingScreenshots {
 sub _getXWindowsList {
     my %list;
 
-    my $s = Wnck::Screen::get_default() or die print $!;
-    $s->force_update();
+    my $s = eval { Wnck::Screen::get_default() };
+    return \%list unless $s;
+    eval { $s->force_update(); };
 
-    foreach my $w (@{$s->get_windows}) {
-        my $xid = $w->get_xid() or next;
-        my $data_name = $w->get_name();
+    foreach my $w (@{$s->get_windows // []}) {
+        my $xid = eval { $w->get_xid() } or next;
+        my $data_name = eval { $w->get_name() };
 
         $list{'by_xid'}{$xid}{'title'} = $data_name;
         $list{'by_xid'}{$xid}{'window'} = $w;

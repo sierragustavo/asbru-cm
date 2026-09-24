@@ -1836,7 +1836,6 @@ sub _setupCallbacks {
         my $modelsort = $$self{_GUI}{treeConnections}->get_model();
         my $model = $modelsort->get_model();
         my $group_uuid = $model->get_value($modelsort->convert_iter_to_child_iter($modelsort->get_iter($path)), 2);
-        $$self{_GUI}{treeConnections}->columns_autosize();
         if ($group_uuid eq '__PAC__ROOT__') {
             return 0;
         }
@@ -4220,10 +4219,14 @@ sub _updateGUIPreferences {
     $$self{_GUI}{frameStatistics}->set_sensitive($total eq 1);
     $$self{_GUI}{frameScreenshots}->set_sensitive($total eq 1 && ! $is_root);
     $$self{_GUI}{connFavourite}->set_sensitive($total >= 1 && ! ($is_root || $is_group));
-    $$self{_NO_PROPAGATE_FAV_TOGGLE} = 1;
-    $$self{_GUI}{connFavourite}->set_active($total eq 1 && ! ($is_root || $is_group) && $$self{_CFG}{'environments'}{$uuid}{'favourite'});
-    $$self{_GUI}{connFavourite}->set_image(Gtk3::Image->new_from_stock('asbru-favourite-' . ($$self{_CFG}{'environments'}{$uuid}{'favourite'} ? 'on' : 'off'), 'button'));
-    $$self{_NO_PROPAGATE_FAV_TOGGLE} = 0;
+    my $is_fav = ($total eq 1 && ! ($is_root || $is_group) && $$self{_CFG}{'environments'}{$uuid}{'favourite'}) ? 1 : 0;
+    if (!defined $$self{_last_fav_state} || $$self{_last_fav_state} != $is_fav) {
+        $$self{_NO_PROPAGATE_FAV_TOGGLE} = 1;
+        $$self{_GUI}{connFavourite}->set_active($is_fav);
+        $$self{_GUI}{connFavourite}->set_image(Gtk3::Image->new_from_stock('asbru-favourite-' . ($is_fav ? 'on' : 'off'), 'button'));
+        $$self{_NO_PROPAGATE_FAV_TOGGLE} = 0;
+        $$self{_last_fav_state} = $is_fav;
+    }
 
     # Apply layout preferences only when changed to avoid layout thrashing on row navigation
     my $cfg_tab_pos = $$self{_CFG}{'defaults'}{'tabs position'};

@@ -373,6 +373,18 @@ sub _cleanupAllTimers {
         eval { Glib::Source->remove($$self{_SOCKET_CLIENT_WATCH}); };
         delete $$self{_SOCKET_CLIENT_WATCH};
     }
+    if (defined $$self{_SOCKET_WATCH}) {
+        eval { Glib::Source->remove($$self{_SOCKET_WATCH}); };
+        delete $$self{_SOCKET_WATCH};
+    }
+    if (defined $$self{_SOCKET_WATCH_EXEC}) {
+        eval { Glib::Source->remove($$self{_SOCKET_WATCH_EXEC}); };
+        delete $$self{_SOCKET_WATCH_EXEC};
+    }
+    if (defined $self->{EMBED_CHECK_TIMEOUT_ID}) {
+        eval { Glib::Source->remove($self->{EMBED_CHECK_TIMEOUT_ID}); };
+        $self->{EMBED_CHECK_TIMEOUT_ID} = undef;
+    }
     if (defined $self->{_LOG}{timeout}) {
         eval { Glib::Source->remove($self->{_LOG}{timeout}); };
         delete $self->{_LOG}{timeout};
@@ -1211,6 +1223,15 @@ sub _setupCallbacks {
 
         if (defined $$self{_KEYS_RECEIVE}) {
             return 1;
+        }
+
+        # Fast path: printable ASCII keystrokes without Ctrl/Alt bypass all hotkey lookups
+        my $ev_state = $event->get_state();
+        if (!($ev_state * ['control-mask', 'mod1-mask'])) {
+            my $kv = $event->keyval;
+            if ($kv >= 32 && $kv <= 126) {
+                return 0;
+            }
         }
 
         if ($$self{_TABBED}) {

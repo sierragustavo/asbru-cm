@@ -76,17 +76,30 @@ sub is_wayland {
 # get_scale_factor()
 # Returns detected display scale factor (1, 2, etc.) for HiDPI rendering.
 # ---------------------------------------------------------------------------
+our $CACHED_SCALE;
+
+sub _check_binary_path {
+    my $bin = shift;
+    foreach my $dir (split /:/, ($ENV{'PATH'} // '')) {
+        next if $dir eq '';
+        my $target = "$dir/$bin";
+        return 1 if (-f $target && -x _);
+    }
+    return 0;
+}
+
 sub get_scale_factor {
+    return $CACHED_SCALE if defined $CACHED_SCALE;
     if (defined $ENV{GDK_SCALE} && $ENV{GDK_SCALE} =~ /^\d+$/ && $ENV{GDK_SCALE} > 0) {
-        return int($ENV{GDK_SCALE});
+        return ($CACHED_SCALE = int($ENV{GDK_SCALE}));
     }
     # Fallback to gsettings text scaling factor if set
     my $scaling = `gsettings get org.gnome.desktop.interface text-scaling-factor 2>/dev/null`;
     if ($scaling && $scaling =~ /([\d\.]+)/) {
         my $val = $1;
-        return 2 if ($val >= 1.5);
+        return ($CACHED_SCALE = ($val >= 1.5 ? 2 : 1));
     }
-    return 1;
+    return ($CACHED_SCALE = 1);
 }
 
 # ---------------------------------------------------------------------------
@@ -124,7 +137,7 @@ sub rdp_client_for_wayland {
 
     # Try to find xfreerdp or xfreerdp3
     for my $bin (qw(xfreerdp3 xfreerdp)) {
-        if (system("which $bin >/dev/null 2>&1") == 0) {
+        if (_check_binary_path($bin)) {
             return $bin;
         }
     }

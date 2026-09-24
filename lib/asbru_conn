@@ -44,9 +44,6 @@ use PACKeePass;
 use PACUtils;
 use PACWayland;
 use POSIX qw(strftime);
-
-use Gtk3;
-
 binmode STDOUT;
 binmode STDERR;
 
@@ -756,12 +753,9 @@ sub _execScript {
             ctrl("SCRIPT_STOPPED_MANUALLY[NAME:$name]");
             msg("Ásbrú Script '$name' terminated by user request (TERM(15) signal)");
             if (defined $_W{window}{data}){
-                $_W{window}{data}->destroy;
+                eval { $_W{window}{data}->destroy; };
             }
             undef %_W;
-            while (Gtk3::events_pending) {
-                Gtk3::main_iteration;
-            }
             die;
         };
 
