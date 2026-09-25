@@ -36,7 +36,18 @@ use lib "$RealBin/lib", "$RealBin/lib/ex";
 # Standard
 use strict;
 use warnings;
-use YAML qw (LoadFile DumpFile);
+BEGIN {
+    if (eval { require YAML::XS; 1 }) {
+        *YAML::LoadFile = \&YAML::XS::LoadFile;
+        *YAML::DumpFile = \&YAML::XS::DumpFile;
+        *LoadFile = \&YAML::XS::LoadFile;
+        *DumpFile = \&YAML::XS::DumpFile;
+    } else {
+        require YAML;
+        *LoadFile = \&YAML::LoadFile;
+        *DumpFile = \&YAML::DumpFile;
+    }
+}
 use Storable qw (thaw dclone nstore retrieve);
 use Encode;
 use File::Copy;
@@ -3720,13 +3731,13 @@ sub _quitProgram {
     # Once everything is hidden, we may last any time in our final I/O
     delete $$self{_CFG}{environments}{'__PAC_SHELL__'};    # Delete PACShell environment
     delete $$self{_CFG}{environments}{'__PAC__QUICK__CONNECT__'}; # Delete quick connect environment
-    if ($save) {
+    if ($save || $$self{_CFG}{defaults}{'auto save'}) {
         # Save config, including tree and stats
         $self->_saveConfiguration();
     }
     # Purge trash statistics
     $$self{_GUI}{statistics}->purge($$self{_CFG});
-    if (!$save && !$ENV{"ASBRU_IS_READONLY"}) {
+    if (!$save && !$$self{_CFG}{defaults}{'auto save'} && !$ENV{"ASBRU_IS_READONLY"}) {
         # Save tree positions & statistics
         $self->_saveTreeExpanded();
         $$self{_GUI}{statistics}->saveStats();
@@ -3737,6 +3748,7 @@ sub _quitProgram {
         # Export as YAML file & perl data
         $$self{_CONFIG}->_exporter('yaml', $CFG_FILE);
         $$self{_CONFIG}->_exporter('perl', $CFG_FILE_DUMPER);
+        utime(undef, undef, $CFG_FILE_NFREEZE) if -e $CFG_FILE_NFREEZE;
     };
 
     # And finish every GUI
@@ -3765,6 +3777,7 @@ sub _saveConfiguration {
     if ($R_CFG_FILE) {
         nstore($cfg, $R_CFG_FILE) or _wMessage($$self{_GUI}{main}, "ERROR: Could not save config file '$R_CFG_FILE':\n\n$!\n\nLocal copy saved at '$CFG_FILE_NFREEZE'");
     }
+    utime(undef, undef, $CFG_FILE_NFREEZE) if -e $CFG_FILE_NFREEZE;
     # Restore passwords
     _decipherCFG($cfg);
     # Restore the temporary sessions
@@ -3773,6 +3786,14 @@ sub _saveConfiguration {
     $self->_saveTreeExpanded();
     # Save satistics
     $$self{_GUI}{statistics}->saveStats();
+
+    if ($normal && $$self{_CONFIG} && !grep(/^--no-backup$/, @{ $$self{_OPTS} }) && !$ENV{"ASBRU_IS_READONLY"}) {
+        eval {
+            $$self{_CONFIG}->_exporter('yaml', $CFG_FILE);
+            $$self{_CONFIG}->_exporter('perl', $CFG_FILE_DUMPER);
+            utime(undef, undef, $CFG_FILE_NFREEZE) if -e $CFG_FILE_NFREEZE;
+        };
+    }
 
     $normal and $self->_setCFGChanged(0);
 
@@ -3815,14 +3836,26 @@ sub _readConfiguration {
     }
 
     if ($continue && -f $CFG_FILE) {
-        if (! ($$self{_CFG} = YAML::LoadFile($CFG_FILE))) {
-            print STDERR "WARNING: Could not load config file '$CFG_FILE': $!\n";
+        my $loaded_cfg;
+        eval {
+            $loaded_cfg = LoadFile($CFG_FILE);
+        };
+        if ($@ || !$loaded_cfg) {
+            eval {
+                require YAML;
+                $loaded_cfg = YAML::LoadFile($CFG_FILE);
+            };
+        }
+        if (!$loaded_cfg) {
+            print STDERR "WARNING: Could not load config file '$CFG_FILE': " . ($@ // $!) . "\n";
         } else {
+            $$self{_CFG} = $loaded_cfg;
             print STDERR "INFO: Used config file '$CFG_FILE'\n";
             if ($R_CFG_FILE) {
                 nstore($$self{_CFG}, $R_CFG_FILE) or die "ERROR: Could not save remote config file '$R_CFG_FILE': $!";
             }
             nstore($$self{_CFG}, $CFG_FILE_NFREEZE) or die "ERROR: Could not save config file '$CFG_FILE_NFREEZE': $!";
+            utime(undef, undef, $CFG_FILE_NFREEZE);
             $continue = 0;
         }
     }

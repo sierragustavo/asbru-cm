@@ -3930,6 +3930,19 @@ sub _wSelectChain {
 
 }
 
+sub _safe_parse_rgba {
+    my ($val, $fallback) = @_;
+    my $rgba;
+    if (defined $val && length($val)) {
+        $rgba = eval { Gtk3::Gdk::RGBA::parse($val) };
+    }
+    if (!defined $rgba && defined $fallback && length($fallback)) {
+        $rgba = eval { Gtk3::Gdk::RGBA::parse($fallback) };
+    }
+    $rgba //= Gtk3::Gdk::RGBA::parse('#000000');
+    return $rgba;
+}
+
 sub _updateCFG {
     my $self = shift;
 
@@ -4159,54 +4172,67 @@ sub _updateCFG {
 
     _setTabColour($self);
 
-    my $colors = [Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color black'} // '#000000000000'),  # black
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color red'}), # red
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color green'}), # green
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color yellow'}), # yellow (=brown)
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color blue'}), # blue
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color magenta'}), # magenta
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color cyan'}), # cyan
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color white'}), # white (=light grey)
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color bright black'}), # light black (=dark grey)
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color bright red'}), # light red
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color bright green'}), # light green
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color bright yellow'}), # light yellow
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color bright blue'}), # light blue
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color bright magenta'}), # light magenta
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color bright cyan'}), # light cyan
-        Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'color bright white'})
-    ]; # light white
+    my $colors = [
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color black'}, '#000000000000'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color red'}, '#cccc00000000'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color green'}, '#4e4e9a9a0606'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color yellow'}, '#c4c4a0a00000'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color blue'}, '#34346565a4a4'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color magenta'}, '#757550507b7b'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color cyan'}, '#060698209a9a'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color white'}, '#d3d3d7d7cfcf'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color bright black'}, '#555557575353'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color bright red'}, '#efef29292929'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color bright green'}, '#8a8ae2e23434'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color bright yellow'}, '#fcfce9e94f4f'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color bright blue'}, '#72729f9fcfcf'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color bright magenta'}, '#adad7f7fa8a8'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color bright cyan'}, '#3434e2e2e2e2'),
+        _safe_parse_rgba($$self{_CFG}{'defaults'}{'color bright white'}, '#eeeeeeeeecec'),
+    ];
+
     # Update some VTE options
     if (($$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'use personal settings'}) && (defined $$self{_GUI}{_VTE})) {
-        $$self{_GUI}{_VTE}->set_colors(scalar Gtk3::Gdk::RGBA::parse($$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'text color'}), scalar Gtk3::Gdk::RGBA::parse($$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'back color'}), $colors);
-        if ($$self{_CFG}{defaults}{'terminal support transparency'} && $$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'terminal transparency'} > 0) {
-            _setTransparency($self, $$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'terminal transparency'}, $$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'back color'});
+        my $env_opts = $$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'};
+        my $fg = _safe_parse_rgba($$env_opts{'text color'}, $$self{_CFG}{'defaults'}{'text color'} // '#cc62cc62cc62');
+        my $bg = _safe_parse_rgba($$env_opts{'back color'}, $$self{_CFG}{'defaults'}{'back color'} // '#000000000000');
+        my $bold_spec = $$env_opts{'bold color like text'} ? $$env_opts{'text color'} : ($$env_opts{'bold color'} // $$env_opts{'text color'});
+        my $bold = _safe_parse_rgba($bold_spec, '#cc62cc62cc62');
+
+        $$self{_GUI}{_VTE}->set_colors($fg, $bg, $colors);
+        if ($$self{_CFG}{defaults}{'terminal support transparency'} && ($$env_opts{'terminal transparency'} // 0) > 0) {
+            _setTransparency($self, $$env_opts{'terminal transparency'}, $$env_opts{'back color'});
         } else {
-            $$self{_GUI}{_VTE}->set_color_background(scalar Gtk3::Gdk::RGBA::parse($$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'back color'}));
+            $$self{_GUI}{_VTE}->set_color_background($bg);
         }
-        $$self{_GUI}{_VTE}->set_color_foreground(scalar Gtk3::Gdk::RGBA::parse($$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'text color'}));
-        $$self{_GUI}{_VTE}->set_color_bold(scalar Gtk3::Gdk::RGBA::parse($$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'bold color like text'} ? $$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'text color'} : $$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'bold color'}));
-        $$self{_GUI}{_VTE}->set_font(Pango::FontDescription::from_string($$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'terminal font'}));
-        $$self{_GUI}{_VTE}->set_property('cursor-shape', $$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'cursor shape'});
-        $$self{_GUI}{_VTE}->set_encoding($$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'terminal character encoding'} // 'UTF-8');
-        $$self{_GUI}{_VTE}->set_backspace_binding($$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'terminal backspace'});
-        $$self{_GUI}{_VTE}->set_word_char_exceptions($$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'terminal select words'});
-        $$self{_GUI}{_VTE}->set_audible_bell($$self{_CFG}{environments}{$$self{_UUID}}{'terminal options'}{'audible bell'});
+        $$self{_GUI}{_VTE}->set_color_foreground($fg);
+        $$self{_GUI}{_VTE}->set_color_bold($bold);
+        $$self{_GUI}{_VTE}->set_font(Pango::FontDescription::from_string($$env_opts{'terminal font'} // 'Monospace 9'));
+        $$self{_GUI}{_VTE}->set_property('cursor-shape', $$env_opts{'cursor shape'} // 'block');
+        $$self{_GUI}{_VTE}->set_encoding($$env_opts{'terminal character encoding'} // 'UTF-8');
+        $$self{_GUI}{_VTE}->set_backspace_binding($$env_opts{'terminal backspace'} // 'auto');
+        $$self{_GUI}{_VTE}->set_word_char_exceptions($$env_opts{'terminal select words'} // '-.:_/');
+        $$self{_GUI}{_VTE}->set_audible_bell($$env_opts{'audible bell'} // 0);
     } elsif (defined $$self{_GUI}{_VTE}) {
-        $$self{_GUI}{_VTE}->set_colors(scalar Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'text color'}), scalar Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'back color'}), $colors);
-        if ($$self{_CFG}{defaults}{'terminal support transparency'} && $$self{_CFG}{defaults}{'terminal transparency'} > 0) {
+        my $fg = _safe_parse_rgba($$self{_CFG}{'defaults'}{'text color'}, '#cc62cc62cc62');
+        my $bg = _safe_parse_rgba($$self{_CFG}{'defaults'}{'back color'}, '#000000000000');
+        my $bold_spec = $$self{_CFG}{'defaults'}{'bold color like text'} ? $$self{_CFG}{'defaults'}{'text color'} : ($$self{_CFG}{'defaults'}{'bold color'} // $$self{_CFG}{'defaults'}{'text color'});
+        my $bold = _safe_parse_rgba($bold_spec, '#cc62cc62cc62');
+
+        $$self{_GUI}{_VTE}->set_colors($fg, $bg, $colors);
+        if ($$self{_CFG}{defaults}{'terminal support transparency'} && ($$self{_CFG}{defaults}{'terminal transparency'} // 0) > 0) {
             _setTransparency($self, $$self{_CFG}{defaults}{'terminal transparency'}, $$self{_CFG}{'defaults'}{'back color'});
         } else {
-            $$self{_GUI}{_VTE}->set_color_background(scalar Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'back color'}));
+            $$self{_GUI}{_VTE}->set_color_background($bg);
         }
-        $$self{_GUI}{_VTE}->set_color_foreground(scalar Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'text color'}));
-        $$self{_GUI}{_VTE}->set_color_bold(scalar Gtk3::Gdk::RGBA::parse($$self{_CFG}{'defaults'}{'bold color like text'} ? $$self{_CFG}{'defaults'}{'text color'} : $$self{_CFG}{'defaults'}{'bold color'}));
-        $$self{_GUI}{_VTE}->set_font(Pango::FontDescription::from_string($$self{_CFG}{'defaults'}{'terminal font'}));
-        $$self{_GUI}{_VTE}->set_property('cursor-shape', $$self{_CFG}{'defaults'}{'cursor shape'});
+        $$self{_GUI}{_VTE}->set_color_foreground($fg);
+        $$self{_GUI}{_VTE}->set_color_bold($bold);
+        $$self{_GUI}{_VTE}->set_font(Pango::FontDescription::from_string($$self{_CFG}{'defaults'}{'terminal font'} // 'Monospace 9'));
+        $$self{_GUI}{_VTE}->set_property('cursor-shape', $$self{_CFG}{'defaults'}{'cursor shape'} // 'block');
         $$self{_GUI}{_VTE}->set_encoding($$self{_CFG}{'defaults'}{'terminal character encoding'} // 'UTF-8');
-        $$self{_GUI}{_VTE}->set_backspace_binding($$self{_CFG}{'defaults'}{'terminal backspace'});
-        $$self{_GUI}{_VTE}->set_word_char_exceptions($$self{_CFG}{'defaults'}{'word characters'});
-        $$self{_GUI}{_VTE}->set_audible_bell($$self{_CFG}{'defaults'}{'audible bell'});
+        $$self{_GUI}{_VTE}->set_backspace_binding($$self{_CFG}{'defaults'}{'terminal backspace'} // 'auto');
+        $$self{_GUI}{_VTE}->set_word_char_exceptions($$self{_CFG}{'defaults'}{'word characters'} // '-.:_/');
+        $$self{_GUI}{_VTE}->set_audible_bell($$self{_CFG}{'defaults'}{'audible bell'} // 0);
     }
 
     if ($$self{_FOCUSED} && $$self{FOCUS}) {

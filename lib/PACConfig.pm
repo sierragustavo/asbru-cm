@@ -597,14 +597,14 @@ sub _exporter {
 
     if ($format eq 'yaml') {
         $suffix = '.yml';
-        $func = 'require YAML; YAML::DumpFile($file, $$self{_CFG}) or die "ERROR: Could not save file \'$file\' ($!)";';
+        $func = 'eval { require YAML::XS; YAML::XS::DumpFile($file, $$self{_CFG}) } or do { require YAML; YAML::DumpFile($file, $$self{_CFG}) } or die "ERROR: Could not save file \'$file\' ($!)";';
     } elsif ($format eq 'perl') {
         $suffix = '.dumper';
         $func = 'use Data::Dumper; $Data::Dumper::Indent = 1; $Data::Dumper::Purity = 1; open(F, ">:utf8",$file) or die "ERROR: Could not open file \'$file\' for writting ($!)"; print F Dumper($$self{_CFG}); close F;';
     } elsif ($format eq 'debug') {
         $name = 'debug';
         $suffix = '.yml';
-        $func = 'require YAML; YAML::DumpFile($file, $$self{_CFG}) or die "ERROR: Could not save file \'$file\' ($!)";';
+        $func = 'eval { require YAML::XS; YAML::XS::DumpFile($file, $$self{_CFG}) } or do { require YAML; YAML::DumpFile($file, $$self{_CFG}) } or die "ERROR: Could not save file \'$file\' ($!)";';
         my $answ = _wConfirm($$self{_WINDOWCONFIG}, "You are about to create a file containing an anonymized version of your settings.\n\nThis file will contain your configuration settings without any sensitive personal data in it.  It is only useful for debugging purposes only. Do not use this file for backup purposes.\n\nCare has been taken to remove all personal information but no guarantee is given, you are the only responsible for any disclosed information.\nPlease review the exported data before sharing it with a third party.\n\n<b>Do you wish to continue?</b>");
         if (!$answ) {
             _wMessage($$self{_WINDOWCONFIG}, "Export process has been canceled.");
@@ -1036,6 +1036,22 @@ sub _closeConfiguration {
     $$self{_WINDOWCONFIG}->hide();
 }
 
+sub _widget_color_str {
+    my ($self, $widget_name, $fallback) = @_;
+    my $w = _($self, $widget_name);
+    return $fallback // '' unless defined $w;
+    my $res;
+    if ($w->can('get_rgba')) {
+        my $rgba = eval { $w->get_rgba() };
+        $res = $rgba->to_string() if defined $rgba;
+    }
+    if ((!defined $res || $res eq '') && $w->can('get_color')) {
+        my $c = eval { $w->get_color() };
+        $res = $c->to_string() if defined $c;
+    }
+    return (defined $res && length($res)) ? $res : ($fallback // '');
+}
+
 sub _saveConfiguration {
     my $self = shift;
 
@@ -1128,14 +1144,14 @@ sub _saveConfiguration {
     $$self{_CFG}{'defaults'}{'tabs position'} = 'right'  if _($self, 'radioCfgTabsRight')->get_active();
     $$self{_CFG}{'defaults'}{'close terminal on disconnect'} = _($self, 'cbCfgCloseTermOnDisconn')->get_active();
     $$self{_CFG}{'defaults'}{'open connections in tabs'} = _($self, 'cbCfgNewInTab')->get_active();
-    $$self{_CFG}{'defaults'}{'text color'} = _($self, 'colorText')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'back color'} = _($self, 'colorBack')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'bold color'} = _($self, 'colorBold')->get_color()->to_string();
+    $$self{_CFG}{'defaults'}{'text color'} = $self->_widget_color_str('colorText', $$self{_CFG}{'defaults'}{'text color'} // '#cc62cc62cc62');
+    $$self{_CFG}{'defaults'}{'back color'} = $self->_widget_color_str('colorBack', $$self{_CFG}{'defaults'}{'back color'} // '#000000000000');
+    $$self{_CFG}{'defaults'}{'bold color'} = $self->_widget_color_str('colorBold', $$self{_CFG}{'defaults'}{'bold color'} // '#cc62cc62cc62');
     $$self{_CFG}{'defaults'}{'bold color like text'} = _($self, 'cbBoldAsText')->get_active();
     $$self{_CFG}{'defaults'}{'bold is brigth'} = _($self, 'chkBoldIsBrigth')->get_active();
-    $$self{_CFG}{'defaults'}{'connected color'} = _($self, 'colorConnected')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'disconnected color'} = _($self, 'colorDisconnected')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'new data color'} = _($self, 'colorNewData')->get_color()->to_string();
+    $$self{_CFG}{'defaults'}{'connected color'} = $self->_widget_color_str('colorConnected', $$self{_CFG}{'defaults'}{'connected color'} // '#0000ffff0000');
+    $$self{_CFG}{'defaults'}{'disconnected color'} = $self->_widget_color_str('colorDisconnected', $$self{_CFG}{'defaults'}{'disconnected color'} // '#000000000000');
+    $$self{_CFG}{'defaults'}{'new data color'} = $self->_widget_color_str('colorNewData', $$self{_CFG}{'defaults'}{'new data color'} // '#00000000ffff');
     $$self{_CFG}{'defaults'}{'terminal font'} = _($self, 'fontTerminal')->get_font_name();
     $$self{_CFG}{'defaults'}{'cursor shape'} = _($self, 'comboCursorShape')->get_active_text();
     $$self{_CFG}{'defaults'}{'save session logs'} = _($self, 'cbCfgSaveSessionLogs')->get_active();
@@ -1167,10 +1183,10 @@ sub _saveConfiguration {
     $$self{_CFG}{'defaults'}{'show statistics'} = _($self, 'cbCfgShowStatistics')->get_active();
 
     $$self{_CFG}{'defaults'}{'unprotected set'} = _($self, 'rbCfgUnForeground')->get_active() ? 'foreground' : 'background' ;
-    $$self{_CFG}{'defaults'}{'unprotected color'} = _($self, 'colorCfgUnProtected')->get_color()->to_string();
+    $$self{_CFG}{'defaults'}{'unprotected color'} = $self->_widget_color_str('colorCfgUnProtected', $$self{_CFG}{'defaults'}{'unprotected color'} // '#000000000000');
 
     $$self{_CFG}{'defaults'}{'protected set'} = _($self, 'rbCfgForeground')->get_active() ? 'foreground' : 'background' ;
-    $$self{_CFG}{'defaults'}{'protected color'} = _($self, 'colorCfgProtected')->get_color()->to_string();
+    $$self{_CFG}{'defaults'}{'protected color'} = $self->_widget_color_str('colorCfgProtected', $$self{_CFG}{'defaults'}{'protected color'} // '#ffff00000000');
 
     $$self{_CFG}{'defaults'}{'use gui password'} = _($self, 'cbCfgUseGUIPassword')->get_active();
     $$self{_CFG}{'defaults'}{'use gui password tray'} = _($self, 'cbCfgUseGUIPasswordTray')->get_active();
@@ -1196,22 +1212,22 @@ sub _saveConfiguration {
     $$self{_CFG}{'defaults'}{'theme'} = _($self, 'comboTheme')->get_active_text();
 
     # Terminal colors
-    $$self{_CFG}{'defaults'}{'color black'} = _($self, 'colorBlack')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color red'} = _($self, 'colorRed')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color green'} = _($self, 'colorGreen')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color yellow'} = _($self, 'colorYellow')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color blue'} = _($self, 'colorBlue')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color magenta'} = _($self, 'colorMagenta')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color cyan'} = _($self, 'colorCyan')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color white'} = _($self, 'colorWhite')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color bright black'} = _($self, 'colorBrightBlack')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color bright red'} = _($self, 'colorBrightRed')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color bright green'} = _($self, 'colorBrightGreen')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color bright yellow'} = _($self, 'colorBrightYellow')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color bright blue'} = _($self, 'colorBrightBlue')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color bright magenta'} = _($self, 'colorBrightMagenta')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color bright cyan'} = _($self, 'colorBrightCyan')->get_color()->to_string();
-    $$self{_CFG}{'defaults'}{'color bright white'} = _($self, 'colorBrightWhite')->get_color()->to_string();
+    $$self{_CFG}{'defaults'}{'color black'} = $self->_widget_color_str('colorBlack', $$self{_CFG}{'defaults'}{'color black'} // '#000000000000');
+    $$self{_CFG}{'defaults'}{'color red'} = $self->_widget_color_str('colorRed', $$self{_CFG}{'defaults'}{'color red'} // '#cccc00000000');
+    $$self{_CFG}{'defaults'}{'color green'} = $self->_widget_color_str('colorGreen', $$self{_CFG}{'defaults'}{'color green'} // '#4e4e9a9a0606');
+    $$self{_CFG}{'defaults'}{'color yellow'} = $self->_widget_color_str('colorYellow', $$self{_CFG}{'defaults'}{'color yellow'} // '#c4c4a0a00000');
+    $$self{_CFG}{'defaults'}{'color blue'} = $self->_widget_color_str('colorBlue', $$self{_CFG}{'defaults'}{'color blue'} // '#34346565a4a4');
+    $$self{_CFG}{'defaults'}{'color magenta'} = $self->_widget_color_str('colorMagenta', $$self{_CFG}{'defaults'}{'color magenta'} // '#757550507b7b');
+    $$self{_CFG}{'defaults'}{'color cyan'} = $self->_widget_color_str('colorCyan', $$self{_CFG}{'defaults'}{'color cyan'} // '#060698209a9a');
+    $$self{_CFG}{'defaults'}{'color white'} = $self->_widget_color_str('colorWhite', $$self{_CFG}{'defaults'}{'color white'} // '#d3d3d7d7cfcf');
+    $$self{_CFG}{'defaults'}{'color bright black'} = $self->_widget_color_str('colorBrightBlack', $$self{_CFG}{'defaults'}{'color bright black'} // '#555557575353');
+    $$self{_CFG}{'defaults'}{'color bright red'} = $self->_widget_color_str('colorBrightRed', $$self{_CFG}{'defaults'}{'color bright red'} // '#efef29292929');
+    $$self{_CFG}{'defaults'}{'color bright green'} = $self->_widget_color_str('colorBrightGreen', $$self{_CFG}{'defaults'}{'color bright green'} // '#8a8ae2e23434');
+    $$self{_CFG}{'defaults'}{'color bright yellow'} = $self->_widget_color_str('colorBrightYellow', $$self{_CFG}{'defaults'}{'color bright yellow'} // '#fcfce9e94f4f');
+    $$self{_CFG}{'defaults'}{'color bright blue'} = $self->_widget_color_str('colorBrightBlue', $$self{_CFG}{'defaults'}{'color bright blue'} // '#72729f9fcfcf');
+    $$self{_CFG}{'defaults'}{'color bright magenta'} = $self->_widget_color_str('colorBrightMagenta', $$self{_CFG}{'defaults'}{'color bright magenta'} // '#adad7f7fa8a8');
+    $$self{_CFG}{'defaults'}{'color bright cyan'} = $self->_widget_color_str('colorBrightCyan', $$self{_CFG}{'defaults'}{'color bright cyan'} // '#3434e2e2e2e2');
+    $$self{_CFG}{'defaults'}{'color bright white'} = $self->_widget_color_str('colorBrightWhite', $$self{_CFG}{'defaults'}{'color bright white'} // '#eeeeeeeeecec');
 
     if (_($self, 'rbOnNoTabsNothing')->get_active()) {
         $$self{_CFG}{'defaults'}{'when no more tabs'} = 0;
@@ -1266,10 +1282,18 @@ sub _saveConfiguration {
     # Save KeyBindings options
     $$self{_CFG}{'defaults'}{'keybindings'} = $$self{_KEYBINDS}->get_cfg();
 
-    $PACMain::FUNCS{_MAIN}->_setCFGChanged(1);
+    # Immediately persist configuration to disk (both nfreeze and yaml/dumper)
+    if ($PACMain::FUNCS{_MAIN}) {
+        $PACMain::FUNCS{_MAIN}->_saveConfiguration(undef, 1);
+        eval {
+            $self->_exporter('yaml', $PACMain::CFG_FILE);
+            $self->_exporter('perl', $PACMain::CFG_FILE_DUMPER);
+            utime(undef, undef, $PACMain::CFG_FILE_NFREEZE) if -e $PACMain::CFG_FILE_NFREEZE;
+        };
+        $PACMain::FUNCS{_MAIN}->_setCFGChanged(0);
+        $PACMain::FUNCS{_MAIN}->_updateGUIPreferences();
+    }
     $self->_updateGUIPreferences();
-
-    $PACMain::FUNCS{_MAIN}->_updateGUIPreferences();
 
     # Send a signal to every started terminal for this $uuid to realize the new global CFG
     map {eval {$$_{'terminal'}->_updateCFG;};} (values %PACMain::RUNNING);

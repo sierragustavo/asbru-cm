@@ -124,6 +124,15 @@ use PACUtils qw (_appName);
 use File::Temp qw (tempdir);
 use Fcntl qw(:flock);
 
+BEGIN {
+    if (eval { require YAML::XS; 1 }) {
+        *YAML::LoadFile = \&YAML::XS::LoadFile;
+        *YAML::DumpFile = \&YAML::XS::DumpFile;
+    } else {
+        require YAML;
+    }
+}
+
 # Standard
 use strict;
 use warnings;
@@ -349,9 +358,19 @@ sub CheckConfigurationFile {
         }
     }
     eval {
-        $cfg = YAML::LoadFile($CFG_FILE);
+        $cfg = eval { require YAML::XS; YAML::XS::LoadFile($CFG_FILE) } || YAML::LoadFile($CFG_FILE);
     };
     if ($@ || !$cfg) {
+        if (-e $nfreeze && -s $nfreeze > 0) {
+            eval {
+                require Storable;
+                $cfg = Storable::retrieve($nfreeze);
+            };
+            if (!$@ && $cfg && ref($cfg) eq 'HASH') {
+                print "INFO: Using valid asbru.nfreeze after YAML parse failure\n";
+                return;
+            }
+        }
         my $OK = 0;
         print "INFO: Config file lost or corrupted, trying to recover a previous configuration file...\n";
         # Remove freeze file
@@ -363,7 +382,7 @@ sub CheckConfigurationFile {
             }
             print "INFO: Testing recovery file $CFG_FILE_NAME.$n...\n";
             eval {
-                $cfg = YAML::LoadFile("$BACKUP_CFG_FILE.$n");
+                $cfg = eval { require YAML::XS; YAML::XS::LoadFile("$BACKUP_CFG_FILE.$n") } || YAML::LoadFile("$BACKUP_CFG_FILE.$n");
             };
             if (!$@ && $cfg) {
                 print "INFO: Found valid file $CFG_FILE_NAME.$n, recovering...\n";

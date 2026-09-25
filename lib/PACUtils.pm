@@ -3810,14 +3810,19 @@ sub _updateWidgetColor {
     my $cfg = shift;
     my $widget = shift;
     my $cfgName = shift;
-    my $defaultColor = shift;
+    my $defaultColor = shift // '#000000';
     # If we don't have an object yet, get it from self
     if (ref($widget) eq '') {
         $widget = _($self, $widget);
     }
-    my $tmpColor = Gtk3::Gdk::RGBA::parse($$cfg{$cfgName} // $defaultColor);
+    return unless defined $widget;
+    my $val = (defined $$cfg{$cfgName} && length($$cfg{$cfgName})) ? $$cfg{$cfgName} : $defaultColor;
+    my $tmpColor = eval { Gtk3::Gdk::RGBA::parse($val) }
+                || eval { Gtk3::Gdk::RGBA::parse($defaultColor) }
+                || Gtk3::Gdk::RGBA::parse('#000000');
     $widget->set_rgba($tmpColor);
 }
+
 
 sub _getSelectedRows {
     my $treeSelection = shift;
