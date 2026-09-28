@@ -150,6 +150,10 @@ sub new {
         _quitProgram($self, 'force');
         exit 0;
     };
+    $SIG{'PIPE'} = 'IGNORE';
+    $SIG{'HUP'}  = 'IGNORE';
+    $SIG{'USR1'} = 'IGNORE';
+    $SIG{'USR2'} = 'IGNORE';
 
     $self->{_CFG} = {};
     @{ $self->{_OPTS} } = @argv;
@@ -3025,11 +3029,12 @@ sub _treeConnections_menu_lite {
     my @submenu_cluster;
     my %clusters;
     foreach my $uuid_tmp (keys %RUNNING) {
-        if (!$RUNNING{$uuid_tmp}{terminal}{_CLUSTER}) {
-            next;
-        }
-        $clusters{$RUNNING{$uuid_tmp}{terminal}{_CLUSTER}}{total}++;
-        $clusters{$RUNNING{$uuid_tmp}{terminal}{_CLUSTER}}{connections} .= "$RUNNING{$uuid_tmp}{terminal}{_NAME}\n";
+        my $t = $RUNNING{$uuid_tmp}{terminal};
+        next unless defined $t && ref($t) =~ /^PACTerminal/;
+        my $c = $t->{_CLUSTER};
+        next unless defined $c && $c ne '';
+        $clusters{$c}{total}++;
+        $clusters{$c}{connections} .= ($t->{_NAME} // '') . "\n";
     }
     foreach my $cluster (sort { $a cmp $b } keys %clusters) {
         my $tmp = $cluster;
@@ -3398,11 +3403,12 @@ sub _treeConnections_menu {
     my @submenu_cluster;
     my %clusters;
     foreach my $uuid_tmp (keys %RUNNING) {
-        if (!$RUNNING{$uuid_tmp}{terminal}{_CLUSTER}) {
-            next;
-        }
-        $clusters{$RUNNING{$uuid_tmp}{terminal}{_CLUSTER}}{total}++;
-        $clusters{$RUNNING{$uuid_tmp}{terminal}{_CLUSTER}}{connections} .= "$RUNNING{$uuid_tmp}{terminal}{_NAME}\n";
+        my $t = $RUNNING{$uuid_tmp}{terminal};
+        next unless defined $t && ref($t) =~ /^PACTerminal/;
+        my $c = $t->{_CLUSTER};
+        next unless defined $c && $c ne '';
+        $clusters{$c}{total}++;
+        $clusters{$c}{connections} .= ($t->{_NAME} // '') . "\n";
     }
     foreach my $cluster (sort { $a cmp $b } keys %clusters) {
         my $tmp = $cluster;
@@ -3542,7 +3548,9 @@ sub _freeClusterColor {
         return 0;
     }
     foreach my $uuid_tmp (keys %RUNNING) {
-        my $running = $RUNNING{$uuid_tmp}{terminal}{_CLUSTER} // '';
+        my $t = $RUNNING{$uuid_tmp}{terminal};
+        next unless defined $t && ref($t) =~ /^PACTerminal/;
+        my $running = $t->{_CLUSTER} // '';
         if ($running eq $cluster) {
             $total++;
             last;

@@ -116,6 +116,7 @@ sub __disconnect {
 $SIG{'INT'} = \&__disconnect;
 $SIG{'TERM'} = \&__disconnect;
 $SIG{'QUIT'} = \&__disconnect;
+$SIG{'PIPE'} = 'IGNORE';
 # END OF : Signal handling
 ########################################################
 
@@ -323,10 +324,13 @@ sub ctrl {
         return 1;
     }
 
-    my $wout = '';
-    vec($wout, fileno($SOCKET), 1) = 1;
-    select(undef, $wout, undef, 5) or die "ERROR: Could not write to PACMain SOCKET at $SOCK_FILE: $!";
-    $SOCKET->send('PAC_MSG_START[' . encode('UTF-16', $msg) . ']PAC_MSG_END');
+    eval {
+        my $wout = '';
+        vec($wout, fileno($SOCKET), 1) = 1;
+        if (select(undef, $wout, undef, 5)) {
+            $SOCKET->send('PAC_MSG_START[' . encode('UTF-16', $msg) . ']PAC_MSG_END');
+        }
+    };
     return 1;
 }
 
@@ -2301,10 +2305,10 @@ if (($why ne 0) && $RESTART) {
 }
 
 # Finish this expect session
-if (defined $EXP->pid) {
+if ($EXP && defined $EXP->pid && $EXP->pid > 0) {
     kill(15, $EXP->pid);
 }
-$EXP->hard_close();
+$EXP->hard_close() if $EXP;
 
 close_log_file();
 

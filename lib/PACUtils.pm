@@ -351,9 +351,20 @@ sub _screenshot {
     my $widget = shift;
     my $file = shift;
 
-    my $gdkpixbuf = Gtk3::Gdk::pixbuf_get_from_window($widget->get_window, $widget->get_allocation->{'x'}, $widget->get_allocation->{'y'}, $widget->get_allocation->{'width'}, $widget->get_allocation->{'height'});
+    return undef unless defined $widget;
 
-    return defined $file ? $gdkpixbuf->save($file, 'png') : $gdkpixbuf;
+    my $gdkpixbuf;
+    eval {
+        my $window = $widget->get_window;
+        return undef unless defined $window;
+        my $alloc = $widget->get_allocation;
+        return undef unless defined $alloc && ($alloc->{'width'} // 0) > 0 && ($alloc->{'height'} // 0) > 0;
+        $gdkpixbuf = Gtk3::Gdk::pixbuf_get_from_window($window, $alloc->{'x'}, $alloc->{'y'}, $alloc->{'width'}, $alloc->{'height'});
+        if (defined $file && defined $gdkpixbuf) {
+            $gdkpixbuf->save($file, 'png');
+        }
+    };
+    return $@ ? undef : (defined $file ? 1 : $gdkpixbuf);
 }
 
 # TODO: This should validate for file existence, eval generates errors an warnings in verbose mode
@@ -3856,41 +3867,50 @@ sub _getSelectedRows {
 sub _vteFeed {
     my $vte = shift;
     my $str = shift;
-    my @arr = unpack ('C*', $str);
-    $vte->feed(\@arr);
+    return unless defined $vte;
+    eval {
+        my @arr = unpack ('C*', $str);
+        $vte->feed(\@arr);
+    };
 }
 
 sub _vteFeedChild {
     my $vte = shift;
     my $str = shift;
-    my $feedVersion = $PACMain::FUNCS{_MAIN}{_Vte}{vte_feed_child};
+    return unless defined $vte;
+    eval {
+        my $feedVersion = $PACMain::FUNCS{_MAIN}{_Vte}{vte_feed_child} // 1;
 
-    use bytes;
-    my $b = length($str);
-    my @arr = unpack ('C*', $str);
+        use bytes;
+        my $b = length($str);
+        my @arr = unpack ('C*', $str);
 
-    if ($feedVersion == 1) {
-        # Newer version only requires 1 parameter
-        $vte->feed_child(\@arr);
-    } else {
-        # Elder versions requires 2 parameters
-        $vte->feed_child($str, $b);
-    }
+        if ($feedVersion == 1) {
+            # Newer version only requires 1 parameter
+            $vte->feed_child(\@arr);
+        } else {
+            # Elder versions requires 2 parameters
+            $vte->feed_child($str, $b);
+        }
+    };
 }
 
 sub _vteFeedChildBinary {
     my $vte = shift;
     my $str = shift;
-    my @arr = unpack ('C*', $str);
-    my $feedVersion = $PACMain::FUNCS{_MAIN}{_Vte}{vte_feed_binary};
+    return unless defined $vte;
+    eval {
+        my @arr = unpack ('C*', $str);
+        my $feedVersion = $PACMain::FUNCS{_MAIN}{_Vte}{vte_feed_binary} // 1;
 
-    if ($feedVersion == 1) {
-        # Newer version only requires 1 parameter
-        $vte->feed_child_binary(\@arr);
-    } else {
-        # Elder versions requires 2 parameters
-        $vte->feed_child_binary(\@arr, length(\@arr));
-    }
+        if ($feedVersion == 1) {
+            # Newer version only requires 1 parameter
+            $vte->feed_child_binary(\@arr);
+        } else {
+            # Elder versions requires 2 parameters
+            $vte->feed_child_binary(\@arr, length(\@arr));
+        }
+    };
 }
 
 sub _createBanner {

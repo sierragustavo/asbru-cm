@@ -1612,16 +1612,24 @@ sub _execScript {
             # Continue waiting if this tmp_uuid is still in "CONNECTING" state
             return 1 if $PACMain::RUNNING{$tmp_uuid}{terminal}{CONNECTING};
             # Skip if this tmp_uuid was not properly connected (for some reason)
-            return 0 unless $PACMain::RUNNING{$tmp_uuid}{terminal}{CONNECTED};
+            my $t = $PACMain::RUNNING{$tmp_uuid}{terminal};
+            return 0 unless defined $t && ref($t) =~ /^PACTerminal/ && $t->{CONNECTED};
 
             # Advise asbru_conn to receive script name
-            kill(12, $PACMain::RUNNING{$tmp_uuid}{terminal}{_PID});
+            my $pid = $t->{_PID};
+            if ($pid && $pid > 0) {
+                kill(12, $pid);
+            }
             my %tmp;
             $tmp{name} = $name;
             $tmp{script} = $txt;
             $tmp{shared} = \%SHARED;
 
-            nstore_fd(\%tmp, $PACMain::RUNNING{$tmp_uuid}{terminal}{_SOCKET_CLIENT}) or die "ERROR:$!";
+            if (defined $t->{_SOCKET_CLIENT}) {
+                eval {
+                    nstore_fd(\%tmp, $t->{_SOCKET_CLIENT});
+                };
+            }
 
             # Stop
             return 0;

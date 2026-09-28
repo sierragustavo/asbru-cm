@@ -427,16 +427,20 @@ sub _setupCallbacks {
         my $cluster = $$self{_WINDOWPCC}{comboTerminals}->get_active_text // '';
 
         foreach my $uuid (keys %{$$self{_RUNNING}}) {
-            my $connected = $$self{_RUNNING}{$uuid}{'terminal'}{'CONNECTED'};
-            my $this_cluster = $$self{_RUNNING}{$uuid}{'terminal'}{'_CLUSTER'} // '';
-            my $vte = $$self{_RUNNING}{$uuid}{'terminal'}{'_GUI'}{_VTE};
+            my $t = $$self{_RUNNING}{$uuid}{'terminal'};
+            next unless defined $t && ref($t) =~ /^PACTerminal/;
+            my $connected = $t->{'CONNECTED'};
+            my $this_cluster = $t->{'_CLUSTER'} // '';
+            my $vte = $t->{'_GUI'}{_VTE};
 
             if (!((defined $vte) && ((($cluster ne '') && ($this_cluster eq $cluster) ) || $$self{_WINDOWPCC}{cbSendToAll}->get_active))) {
                 next;
             }
-            $$self{_RUNNING}{$uuid}{'terminal'}{_LISTEN_COMMIT} = 0;
-            _vteFeedChild($$self{_RUNNING}{$uuid}{'terminal'}{_GUI}{_VTE}, $text);
-            $$self{_RUNNING}{$uuid}{'terminal'}{_LISTEN_COMMIT} = 1;
+            $t->{_LISTEN_COMMIT} = 0;
+            eval {
+                _vteFeedChild($vte, $text);
+            };
+            $t->{_LISTEN_COMMIT} = 1;
         }
         return 1;
     });
@@ -466,16 +470,20 @@ sub _setupCallbacks {
         }
 
         foreach my $uuid (keys %{$$self{_RUNNING}}) {
-            my $connected = $$self{_RUNNING}{$uuid}{'terminal'}{'CONNECTED'};
-            my $this_cluster = $$self{_RUNNING}{$uuid}{'terminal'}{'_CLUSTER'} // '';
-            my $vte = $$self{_RUNNING}{$uuid}{'terminal'}{'_GUI'}{_VTE};
+            my $t = $$self{_RUNNING}{$uuid}{'terminal'};
+            next unless defined $t && ref($t) =~ /^PACTerminal/;
+            my $connected = $t->{'CONNECTED'};
+            my $this_cluster = $t->{'_CLUSTER'} // '';
+            my $vte = $t->{'_GUI'}{_VTE};
 
             if (!((defined $vte) && ((($cluster ne '') && ($this_cluster eq $cluster) ) || $$self{_WINDOWPCC}{cbSendToAll}->get_active))) {
                 next;
             }
-            $$self{_RUNNING}{$uuid}{'terminal'}{_LISTEN_COMMIT} = 0;
-            $vte->signal_emit('key_press_event', $event);
-            $$self{_RUNNING}{$uuid}{'terminal'}{_LISTEN_COMMIT} = 1;
+            $t->{_LISTEN_COMMIT} = 0;
+            eval {
+                $vte->signal_emit('key_press_event', $event);
+            };
+            $t->{_LISTEN_COMMIT} = 1;
         }
 
         # Return 'TRUE' to prevent the characters from appearing in the entry box
@@ -818,8 +826,11 @@ sub _setupCallbacks {
         my @list = keys %{$$self{_WINDOWPCC}{cbSendToAll}->get_active ? $$self{_RUNNING} : $$self{_CLUSTERS}{$cluster}};
         return 1 unless scalar(@list) && _wConfirm($$self{_WINDOWPCC}{main}, "Are you sure you want to RESTART <b>every</b> terminal" . ($cluster ne '' ? " in cluster '$cluster'" : '') . "?");
         foreach my $uuid (@list) {
-            kill(15, $$self{_RUNNING}{$uuid}{'terminal'}{_PID}) if ($$self{_RUNNING}{$uuid}{'terminal'}{_PID} // 0);
-            $$self{_RUNNING}{$uuid}{'terminal'}->start;
+            my $t = $$self{_RUNNING}{$uuid}{'terminal'};
+            next unless defined $t && ref($t) =~ /^PACTerminal/;
+            my $pid = $t->{_PID};
+            kill(15, $pid) if ($pid && $pid > 0);
+            $t->start;
         }
         return 1;
     });
@@ -953,15 +964,19 @@ sub _execOnClusterTerminals {
     }
     my $cluster = $$self{_WINDOWPCC}{comboTerminals}->get_active_text // '';
     foreach my $uuid (keys %{$$self{_RUNNING}}) {
-        my $this_cluster = $$self{_RUNNING}{$uuid}{'terminal'}{'_CLUSTER'} // '';
-        my $vte = $$self{_RUNNING}{$uuid}{'terminal'}{'_GUI'}{_VTE};
+        my $t = $$self{_RUNNING}{$uuid}{'terminal'};
+        next unless defined $t && ref($t) =~ /^PACTerminal/;
+        my $this_cluster = $t->{'_CLUSTER'} // '';
+        my $vte = $t->{'_GUI'}{_VTE};
 
         if (!((defined $vte) && ((($cluster ne '') && ($this_cluster eq $cluster) ) || $$self{_WINDOWPCC}{cbSendToAll}->get_active))) {
             next;
         }
-        $$self{_RUNNING}{$uuid}{'terminal'}{_LISTEN_COMMIT} = 0;
-        $$self{_RUNNING}{$uuid}{'terminal'}->_execute('remote', $text, 0, $$self{_WINDOWPCC}{cbSubstitute}->get_active || $force_subst);
-        $$self{_RUNNING}{$uuid}{'terminal'}{_LISTEN_COMMIT} = 1;
+        $t->{_LISTEN_COMMIT} = 0;
+        eval {
+            $t->_execute('remote', $text, 0, $$self{_WINDOWPCC}{cbSubstitute}->get_active || $force_subst);
+        };
+        $t->{_LISTEN_COMMIT} = 1;
     }
 
     return 1;
@@ -972,7 +987,7 @@ sub _updateGUI {
 
     my $win_visible = ($$self{_WINDOWPCC} && $$self{_WINDOWPCC}{main} && $$self{_WINDOWPCC}{main}->get_visible());
     if (!$win_visible) {
-        $$self{_CLUSTERS} = undef;
+        $$self{_CLUSTERS} = {};
         foreach my $uuid (keys %{$$self{_RUNNING}}) {
             my $name = $$self{_RUNNING}{$uuid}{'terminal'}{'_NAME'};
             next unless defined $name;
@@ -1007,7 +1022,7 @@ sub _updateGUI {
     # Empty the clusters combobox
     $$self{_WINDOWPCC}{comboTerminals}->remove_all();
 
-    $$self{_CLUSTERS} = undef;
+    $$self{_CLUSTERS} = {};
 
     # Look into every started terminal, and save the list of clusters/term per cluster
     foreach my $uuid (keys %{$$self{_RUNNING}}) {

@@ -1506,11 +1506,13 @@ sub _updateGUI {
 
     my $win_visible = ($$self{_WINDOWCLUSTER} && $$self{_WINDOWCLUSTER}{main} && $$self{_WINDOWCLUSTER}{main}->get_visible());
     if (!$win_visible) {
-        $$self{_CLUSTERS} = undef;
+        $$self{_CLUSTERS} = {};
         foreach my $uuid (keys %{$$self{_RUNNING}}) {
-            my $name = $$self{_RUNNING}{$uuid}{'terminal'}{'_NAME'};
+            my $t = $$self{_RUNNING}{$uuid}{'terminal'};
+            next unless defined $t && ref($t) =~ /^PACTerminal/;
+            my $name = $t->{'_NAME'};
             next unless defined $name;
-            if (my $cluster = $$self{_RUNNING}{$uuid}{'terminal'}{_CLUSTER}) {
+            if (my $cluster = $t->{_CLUSTER}) {
                 $$self{_CLUSTERS}{$cluster}{$uuid} = 1;
             }
         }
@@ -1527,18 +1529,20 @@ sub _updateGUI {
     @{$$self{_WINDOWCLUSTER}{treeTerminals}->{data}} = ();
     # Empty the clustered tree
     @{$$self{_WINDOWCLUSTER}{treeClustered}->{data}} = ();
-    $$self{_CLUSTERS} = undef;
+    $$self{_CLUSTERS} = {};
 
     # Look into every started terminal, and add it to the 'clustered' or 'unclustered' tree...
     foreach my $uuid (keys %{$$self{_RUNNING}}) {
-        my $name = $$self{_RUNNING}{$uuid}{'terminal'}{'_NAME'};
-        my $icon = $$self{_RUNNING}{$uuid}{'terminal'}{CONNECTED} ? $ICON_ON : $ICON_OFF;
+        my $t = $$self{_RUNNING}{$uuid}{'terminal'};
+        next unless defined $t && ref($t) =~ /^PACTerminal/;
+        my $name = $t->{'_NAME'};
+        my $icon = $t->{CONNECTED} ? $ICON_ON : $ICON_OFF;
 
         if ((!defined $name) || !(defined $icon)) {
             next;
         }
 
-        if (my $cluster = $$self{_RUNNING}{$uuid}{'terminal'}{_CLUSTER}) {
+        if (my $cluster = $t->{_CLUSTER}) {
             # Populate the CLUSTER variable
             $$self{_CLUSTERS}{$cluster}{$uuid} = 1;
             # Populate the clustered terminals tree

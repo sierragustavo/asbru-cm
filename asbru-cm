@@ -101,6 +101,12 @@ BEGIN {
     if (!defined($ENV{'ASBRU_ENV_FOR_EXTERNAL'})) {
         $ENV{'ASBRU_ENV_FOR_EXTERNAL'} = "";
     }
+
+    # Ignore signals that should not kill the main application
+    $SIG{'PIPE'} = 'IGNORE';
+    $SIG{'HUP'}  = 'IGNORE';
+    $SIG{'USR1'} = 'IGNORE';
+    $SIG{'USR2'} = 'IGNORE';
 }
 
 ###################################################################

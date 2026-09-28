@@ -775,14 +775,18 @@ sub _startSendStringTimeout {
     $$self{_CFG}{environments}{$$self{_UUID}}{'send string active'} and $$self{_SEND_STRING} = Glib::Timeout->add_seconds(
         $$self{_CFG}{environments}{$$self{_UUID}}{'send string every'},
         sub {
-            if (not $$self{CONNECTED} && $$self{_CFG}{environments}{$$self{_UUID}}{'send string active'}) {
+            return 0 unless defined $self && defined $$self{_UUID};
+            return 0 unless $$self{_CFG}{environments}{$$self{_UUID}}{'send string active'};
+            if (not $$self{CONNECTED}) {
                 return 1;
             }
 
             my $txt = $$self{_CFG}{environments}{$$self{_UUID}}{'send string txt'};
             my $intro = $$self{_CFG}{environments}{$$self{_UUID}}{'send string intro'};
             $txt = _subst($txt, $$self{_CFG}, $$self{_UUID}, $$self{_UUID_TMP});
-            _vteFeedChild($$self{_GUI}{_VTE}, $txt . ($intro ? "\n" : ''));
+            eval {
+                _vteFeedChild($$self{_GUI}{_VTE}, $txt . ($intro ? "\n" : ''));
+            };
 
             return 1;
         }
@@ -1618,13 +1622,15 @@ sub _setupCallbacks {
         # Do retry on disconnect
         if ($$self{_RESTART} && $$self{_RECONNECTS} < $$self{_CFG}{'defaults'}{'max retry on disconnect'}) {
             if (!defined $$self{_RECONNECT_WAIT_TIME}) {
-                # Using a list of prime numbers to wait more after each retry
-                # (see http://neilk.net/blog/2000/06/01/abigails-regex-to-test-for-prime-numbers/)
-                @{$$self{_RECONNECT_WAIT_TIME}} = grep { $_ if (1 x $_) !~ /^1?$|^(11+?)\1+$/ } 1..500;
+                @{$$self{_RECONNECT_WAIT_TIME}} = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29);
             }
-            sleep($$self{_RECONNECT_WAIT_TIME}[min(@{$$self{_RECONNECT_WAIT_TIME}}, $$self{_RECONNECTS})]);
+            my $wait_idx = $$self{_RECONNECTS} < scalar(@{$$self{_RECONNECT_WAIT_TIME}}) ? $$self{_RECONNECTS} : $#{$$self{_RECONNECT_WAIT_TIME}};
+            my $wait_time = $$self{_RECONNECT_WAIT_TIME}[$wait_idx] // 2;
             $$self{_RECONNECTS}++;
-            $self->start();
+            Glib::Timeout->add_seconds($wait_time, sub {
+                $self->start() if defined $self;
+                return 0;
+            });
         } else {
             # Check for post-connection commands execution
             $self->_wPrePostExec('local after');
@@ -1654,7 +1660,9 @@ sub _watchConnectionData {
     $self->_receiveData();
 
     while (my $data = shift(@{$self->{_SOCKET_BUFFER}})) {
-        $data = decode('UTF-16', $data);
+        eval { $data = decode('UTF-16', $data); };
+        next if $@ || !defined $data;
+        $data =~ s/\R/ /g;
 
         if ($data eq 'CONNECTED') {
             $$self{_GUI}{statusIcon}->set_from_stock('asbru-terminal-ok-small', 'button');
@@ -1838,7 +1846,6 @@ sub _receiveData {
         while ($buffer =~ s/PAC_MSG_START\[(.*?)\]PAC_MSG_END//s) {
             my $msg = $1;
             next unless length($msg);
-            $msg =~ s/\R/ /g;
             push(@{$$self{_SOCKET_BUFFER}}, $msg);
         }
 
@@ -1855,8 +1862,11 @@ sub _sendData {
     my $msg = shift // '';
     my $socket = shift // $$self{_SOCKET_CLIENT};
 
-    $msg = encode('UTF-16', $msg);
-    $socket->send("PAC_MSG_START[$msg]PAC_MSG_END");
+    return unless defined $socket;
+    eval {
+        $msg = encode('UTF-16', $msg);
+        $socket->send("PAC_MSG_START[$msg]PAC_MSG_END");
+    };
 }
 
 sub _authClient {
@@ -1866,13 +1876,17 @@ sub _authClient {
     # Make sure that this client is a PAC client:
     $self->_receiveData($socket);
     my $data = shift(@{$self->{_SOCKET_BUFFER}});
-    $data = decode('UTF-16', $data);
+    return 0 unless defined $data;
+    eval { $data = decode('UTF-16', $data); };
+    return 0 if $@ || !defined $data;
 
     if ($data ne "!!_PAC_AUTH_[$$self{_UUID_TMP}]!!") {
         return 0;
     }
 
-    $socket->send("!!_PAC_AUTH_[$$self{_UUID_TMP}]!!");
+    eval {
+        $socket->send("!!_PAC_AUTH_[$$self{_UUID_TMP}]!!");
+    };
 
     return 1;
 }
@@ -2591,6 +2605,7 @@ sub _setTabColour {
     if (($$self{_CFG}{'defaults'}{'layout'} ne 'Compact') && (! defined $$self{_TAKE_SCREENSHOT} && ! scalar(@{$$self{_CFG}{environments}{$$self{_UUID}}{screenshots} // []}))) {
         if (($$self{_UUID} ne '__PAC__QUICK__CONNECT__') && ($$self{_UUID} ne '__PAC_SHELL__') && $$self{'_CFG'}{'defaults'}{'show screenshots'}) {
             $$self{_TAKE_SCREENSHOT} = Glib::Timeout->add_seconds($$self{_CFG}{environments}{$$self{_UUID}}{method} =~ /rdesktop|RDP/go ? 10 : 2, sub {
+                return 0 unless defined $self && defined $$self{_UUID};
                 if ((! $$self{CONNECTED}) || (! $$self{_FOCUSED})) {
                     return 1;
                 }
@@ -2598,9 +2613,11 @@ sub _setTabColour {
                 my $screenshot_file = '';
                 $screenshot_file = '/tmp/asbru_screenshot_' . rand(123456789). '.png';
                 while(-f $screenshot_file) {$screenshot_file = '/tmp/asbru_screenshot_' . rand(123456789). '.png';}
-                _screenshot($$self{EMBED} ? $$self{FOCUS} : $$self{_GUI}{_VBOX}, $screenshot_file);
-                $PACMain::FUNCS{_MAIN}{_GUI}{screenshots}->add($screenshot_file, $$self{_CFG}{'environments'}{$$self{_UUID}});
-                $PACMain::FUNCS{_MAIN}->_updateGUIPreferences();
+                eval {
+                    _screenshot($$self{EMBED} ? $$self{FOCUS} : $$self{_GUI}{_VBOX}, $screenshot_file);
+                    $PACMain::FUNCS{_MAIN}{_GUI}{screenshots}->add($screenshot_file, $$self{_CFG}{'environments'}{$$self{_UUID}});
+                    $PACMain::FUNCS{_MAIN}->_updateGUIPreferences();
+                };
 
                 delete $$self{_TAKE_SCREENSHOT};
                 return 0;
@@ -2733,12 +2750,18 @@ sub _clusterCommit {
     }
     $$self{_LISTEN_COMMIT} = 0;
     foreach my $uuid_tmp (keys %PACMain::RUNNING) {
-        if ((!$PACMain::RUNNING{$uuid_tmp}{terminal}{CONNECTED}) || ($PACMain::RUNNING{$uuid_tmp}{terminal}{_CLUSTER} ne $$self{_CLUSTER}) || ($PACMain::RUNNING{$uuid_tmp}{terminal}{_UUID_TMP} eq $$self{_UUID_TMP})) {
-            next;
+        my $t = $PACMain::RUNNING{$uuid_tmp}{terminal};
+        next unless defined $t && ref($t) =~ /^PACTerminal/;
+        next unless $t->{CONNECTED} && ($t->{_CLUSTER} // '') eq $$self{_CLUSTER};
+        next if ($t->{_UUID_TMP} // '') eq ($$self{_UUID_TMP} // '');
+
+        $t->{_LISTEN_COMMIT} = 0;
+        if (defined $t->{_GUI} && defined $t->{_GUI}{_VTE}) {
+            eval {
+                _vteFeedChild($t->{_GUI}{_VTE}, $string);
+            };
         }
-        $PACMain::RUNNING{$uuid_tmp}{terminal}{_LISTEN_COMMIT} = 0;
-        _vteFeedChild($PACMain::RUNNING{$uuid_tmp}{terminal}{_GUI}{_VTE}, $string);
-        $PACMain::RUNNING{$uuid_tmp}{terminal}{_LISTEN_COMMIT} = 1;
+        $t->{_LISTEN_COMMIT} = 1;
     }
     $$self{_LISTEN_COMMIT} = 1;
 
@@ -3534,7 +3557,7 @@ sub _execute {
         }
         $$self{_EXEC_LAST} = $time;
 
-        if (!kill('USR1', $$self{_PID})) {
+        if (!$$self{_PID} || $$self{_PID} <= 0 || !kill('USR1', $$self{_PID})) {
             _wMessage($$self{_PARENTWINDOW}, "ERROR: Could not signal process '$$self{_PID}'\nInconsistent state!\nPlease, restart PAC!!", 1);
             return 0;
         }
@@ -3545,7 +3568,12 @@ sub _execute {
         $tmp{ctrl} = $$data{ctrl};
         $tmp{intro} = $intro // 1;
         $tmp{cmd} = $cmd;
-        nstore_fd(\%tmp, $$self{_SOCKET_CLIENT}) or die "ERROR:$!";
+        eval {
+            nstore_fd(\%tmp, $$self{_SOCKET_CLIENT});
+        } or do {
+            _wMessage($$self{_PARENTWINDOW}, "ERROR: Could not send data to socket: $@", 1);
+            return 0;
+        };
     } elsif ($where eq 'local') {
         system("$ENV{'ASBRU_ENV_FOR_EXTERNAL'} $cmd &");
     }
@@ -3824,26 +3852,29 @@ sub _wSelectChain {
 
         if ($ppe{window}{gui}{cbExecInCluster}->get_active) {
             foreach my $cluster_uuid (keys %PACMain::RUNNING) {
-                if (! kill('HUP', $PACMain::RUNNING{$cluster_uuid}{terminal}{_PID})) {
-                    _wMessage($$self{_PARENTWINDOW}, "ERROR: Could not signal process '$PACMain::RUNNING{$cluster_uuid}{terminal}{_PID}'\nInconsistent state!\nPlease, restart PAC!!", 1);
-                    return 0;
+                my $c_term = $PACMain::RUNNING{$cluster_uuid}{terminal};
+                next unless defined $c_term && ref($c_term) =~ /^PACTerminal/;
+                my $c_pid = $c_term->{_PID};
+                if ($c_pid && $c_pid > 0) {
+                    kill('HUP', $c_pid);
                 }
-
-                # Send the UUID to chain with
-                $PACMain::RUNNING{$cluster_uuid}{terminal}{_SOCKET_CLIENT}->send("!!_PAC_CHAIN_[$drop_uuid]!!");
-                # And send the configuration for that UUID
-                nstore_fd(\%new_cfg, $PACMain::RUNNING{$cluster_uuid}{terminal}{_SOCKET_CLIENT}) or die "ERROR:$!";
+                if (defined $c_term->{_SOCKET_CLIENT}) {
+                    eval {
+                        $c_term->{_SOCKET_CLIENT}->send("!!_PAC_CHAIN_[$drop_uuid]!!");
+                        nstore_fd(\%new_cfg, $c_term->{_SOCKET_CLIENT});
+                    };
+                }
             }
         } else {
-            if (! kill('HUP', $$self{_PID})) {
-                _wMessage($$self{_PARENTWINDOW}, "ERROR: Could not signal process '$$self{_PID}'\nInconsistent state!\nPlease, restart PAC!!", 1);
-                return 0;
+            if ($$self{_PID} && $$self{_PID} > 0) {
+                kill('HUP', $$self{_PID});
             }
-
-            # Send the UUID to chain with
-            $$self{_SOCKET_CLIENT}->send("!!_PAC_CHAIN_[$drop_uuid]!!");
-            # And send the configuration for that UUID
-            nstore_fd(\%new_cfg, $$self{_SOCKET_CLIENT}) or die "ERROR:$!";
+            if (defined $$self{_SOCKET_CLIENT}) {
+                eval {
+                    $$self{_SOCKET_CLIENT}->send("!!_PAC_CHAIN_[$drop_uuid]!!");
+                    nstore_fd(\%new_cfg, $$self{_SOCKET_CLIENT});
+                };
+            }
         }
 
         undef %new_cfg;
@@ -4615,7 +4646,7 @@ sub _checkSendKeystrokes {
 sub _disconnectTerminal {
     my $self = shift;
 
-    if ($self->{CONNECTED} && $$self{_PID}) {
+    if ($self->{CONNECTED} && $$self{_PID} && $$self{_PID} > 0) {
         # Hide the embed window to avoid unexpected updates or crashes when killing the underlying process
         if ($$self{_GUI}{_SOCKET} && $$self{_GUI}{_SOCKET}->get_plug_window()) {
             $self->_showEmbedMessages();
@@ -4846,31 +4877,53 @@ sub openLog {
     if (!$self->{_LOG}{enabled}) {
         return 0;
     }
-    if (!open(LOG,">>:utf8",$$self{_LOGFILE})) {
+    my $fh;
+    if (!open($fh, ">>:utf8", $$self{_LOGFILE})) {
         $self->{_LOG}{enabled} = 0;
         return 0;
     }
+    $self->{_LOG}{fh} = $fh;
+    return 1;
 }
 
 sub saveLog {
     my $self = shift;
     my $close = shift // 0;
 
-    if (!$self->{_LOG}{enabled}) {
+    return 0 unless defined $self;
+    if (!$self->{_LOG}{enabled} || !$$self{_GUI} || !$$self{_GUI}{_VTE}) {
         return 0;
     }
-    my ($col, $rows) = $$self{_GUI}{_VTE}->get_cursor_position();
+    my ($col, $rows);
+    eval {
+        ($col, $rows) = $$self{_GUI}{_VTE}->get_cursor_position();
+    };
+    return 0 if $@ || !defined $rows;
+
     if ($self->{_LOG}{last_row} == $rows) {
         return 1;
     }
-    my ($string, $l) = $$self{_GUI}{_VTE}->get_text_range_format($self->{_LOG}{format}, $self->{_LOG}{last_row}-1, 0, $rows, 0);
+    my ($string, $l);
+    eval {
+        ($string, $l) = $$self{_GUI}{_VTE}->get_text_range_format($self->{_LOG}{format}, $self->{_LOG}{last_row}-1, 0, $rows, 0);
+    };
+    return 0 if $@ || !defined $string;
+
     $self->{_LOG}{last_row} = $rows;
-    if ($self->{_LOG}{timestamp}) {
-        print LOG '-'x40,"\n";
-        print LOG 'log timestamp:',logTime(),"\n";
-        print LOG '-'x40,"\n";
+    my $fh = $self->{_LOG}{fh};
+    if (!$fh || !tell($fh)) {
+        if (!open($fh, ">>:utf8", $$self{_LOGFILE})) {
+            $self->{_LOG}{enabled} = 0;
+            return 0;
+        }
+        $self->{_LOG}{fh} = $fh;
     }
-    print LOG $string,"\n";
+    if ($self->{_LOG}{timestamp}) {
+        print $fh '-'x40,"\n";
+        print $fh 'log timestamp:',logTime(),"\n";
+        print $fh '-'x40,"\n";
+    }
+    print $fh $string,"\n";
     return 1;
 }
 
@@ -4885,7 +4938,10 @@ sub closeLog {
         delete $self->{_LOG}{timeout};
     }
     $self->saveLog(1);
-    close LOG;
+    if ($self->{_LOG}{fh}) {
+        close $self->{_LOG}{fh};
+        delete $self->{_LOG}{fh};
+    }
     $self->{_LOG}{enabled} = 0;
 }
 
