@@ -73,6 +73,7 @@ my $GLADE_FILE = "$RES_DIR/asbru.glade";
 my $INIT_CFG_FILE = "$RES_DIR/asbru.yml";
 my $CFG_DIR = $ENV{"ASBRU_CFG"};
 my $CFG_FILE = "$CFG_DIR/asbru.yml";
+my $HAS_SSH_JUMP;
 
 # END: Define GLOBAL CLASS variables
 ###################################################################
@@ -817,10 +818,15 @@ sub _updateGUIPreferences {
     # Show Jump options in network settings (only for SSH method)
     if ($$self{_CFG}{'environments'}{$uuid}{'method'} =~ /SSH|SFTP/i) {
         # Control SSH capabilities
-        my $ssh = `$ENV{'ASBRU_ENV_FOR_EXTERNAL'} ssh 2>&1`;
-        $ssh =~ s/\n//g;
-        $ssh =~ s/[ \t][ \t]+/ /g;
-        if ($ssh =~ /-J /) {
+        if (!defined $HAS_SSH_JUMP) {
+            my $ext = $ENV{'ASBRU_ENV_FOR_EXTERNAL'} // '';
+            my $cmd = $ext ne '' ? "$ext ssh 2>&1" : "ssh 2>&1";
+            my $ssh = `$cmd` // '';
+            $ssh =~ s/\n//g;
+            $ssh =~ s/[ \t][ \t]+/ /g;
+            $HAS_SSH_JUMP = ($ssh =~ /-J /) ? 1 : 0;
+        }
+        if ($HAS_SSH_JUMP) {
             # Enable Jump Host
             _($self, 'rbUseProxyJump')->set_tooltip_text("If selected, use a jump host for this connection.\n\nAn alternative to SSH tunneling to access internal machines through gateway.");
         } else {

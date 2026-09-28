@@ -255,8 +255,27 @@ our $DEFAULT_REMOTEHOSTCHANGED_PROMPT = '.*ffending .*key in (.+?)\:(\d+).*';
 # START: Private functions definitions
 
 sub _ {
-    return shift->{_GLADE}->get_object(shift);
+    my $obj = shift;
+    my $name = shift;
+    return undef unless defined $name;
+
+    my $glade;
+    if (ref($obj) && ref($obj) ne 'ARRAY' && ref($obj) ne 'SCALAR') {
+        $glade = $obj->{_GLADE};
+    }
+    if (!defined $glade) {
+        if (defined $PACMain::FUNCS{_EDIT} && $PACMain::FUNCS{_EDIT}{_GLADE}) {
+            $glade = $PACMain::FUNCS{_EDIT}{_GLADE};
+        } elsif (defined $PACMain::FUNCS{_CONFIG} && $PACMain::FUNCS{_CONFIG}{_GLADE}) {
+            $glade = $PACMain::FUNCS{_CONFIG}{_GLADE};
+        } elsif (defined $PACMain::FUNCS{_MAIN} && $PACMain::FUNCS{_MAIN}{_GLADE}) {
+            $glade = $PACMain::FUNCS{_MAIN}{_GLADE};
+        }
+    }
+
+    return defined $glade ? $glade->get_object($name) : undef;
 };
+*PACUtils::_ = \&_;
 
 sub __ {
     my $str = shift // '';
@@ -380,17 +399,20 @@ sub _pixBufFromFile {
     return $gdkpixbuf;
 }
 
-our %CACHED_METHODS;
+our %CACHED_BINARIES;
 
 sub _check_binary {
     my ($bin) = @_;
     return 0 unless defined $bin && length($bin);
+    return $CACHED_BINARIES{$bin} if exists $CACHED_BINARIES{$bin};
     foreach my $dir (split(/:/, $ENV{PATH} // '')) {
         next unless length $dir;
         my $p = "$dir/$bin";
-        return 1 if (-f $p && -x $p);
+        if (-f $p && -x $p) {
+            return $CACHED_BINARIES{$bin} = 1;
+        }
     }
-    return 0;
+    return $CACHED_BINARIES{$bin} = 0;
 }
 
 sub _getMethods {
@@ -400,10 +422,6 @@ sub _getMethods {
 
     if ($theme_dir) {
         $THEME_DIR = $theme_dir;
-    }
-
-    if (%CACHED_METHODS) {
-        return %CACHED_METHODS;
     }
 
     my $rdesktop = _check_binary('rdesktop');
@@ -1229,7 +1247,6 @@ sub _getMethods {
         'icon' => Gtk3::Gdk::Pixbuf->new_from_file_at_scale("$THEME_DIR/asbru_method_generic.svg", 16, 16, 0)
     };
 
-    %CACHED_METHODS = %methods;
     return %methods;
 }
 
